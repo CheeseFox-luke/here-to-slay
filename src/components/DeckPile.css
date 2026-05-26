@@ -1,0 +1,110 @@
+.deck-pile {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.deck-pile--empty {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.deck-pile__stack {
+  position: relative;
+}
+
+.deck-pile__layer,
+.deck-pile__top {
+  display: block;
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+}
+
+.deck-pile__layer {
+  position: absolute;
+  background: var(--border);
+  border: 1px solid var(--border);
+}
+
+/* 主牌库：横放堆叠 */
+.deck-pile--main .deck-pile__stack {
+  width: 120px;
+  height: 88px;
+}
+
+.deck-pile--main .deck-pile__layer {
+  width: 120px;
+  height: 84px;
+}
+
+.deck-pile--main .deck-pile__layer--3 {
+  top: 6px;
+  left: 6px;
+}
+
+.deck-pile--main .deck-pile__layer--2 {
+  top: 3px;
+  left: 3px;
+}
+
+.deck-pile--main .deck-pile__layer--1 {
+  top: 0;
+  left: 0;
+}
+
+.deck-pile--main .deck-pile__top {
+  position: relative;
+  z-index: 1;
+  width: 120px;
+  height: auto;
+}
+
+/* 怪物牌库：卡背竖立 */
+.deck-pile--monster .deck-pile__stack {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 90px;
+  height: 150px;
+}
+
+.deck-pile--monster .deck-pile__layer {
+  width: 68px;
+  height: 132px;
+  border-radius: 4px;
+}
+
+.deck-pile--monster .deck-pile__layer--3 {
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%) translateX(8px);
+}
+
+.deck-pile--monster .deck-pile__layer--2 {
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%) translateX(4px);
+}
+
+.deck-pile--monster .deck-pile__layer--1 {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.deck-pile--monster .deck-pile__top {
+  position: relative;
+  z-index: 1;
+  width: 128px;
+  height: auto;
+  transform: rotate(90deg);
+  transform-origin: center center;
+}
+
+.deck-pile__count {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-h);
+}

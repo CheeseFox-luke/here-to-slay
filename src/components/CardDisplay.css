@@ -1,0 +1,17 @@
+.card-display-wrap {
+  display: inline-block;
+  line-height: 0;
+}
+
+.card-display {
+  display: block;
+  width: 120px;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  flex-shrink: 0;
+}
+
+.card-display--large {
+  width: 160px;
+}

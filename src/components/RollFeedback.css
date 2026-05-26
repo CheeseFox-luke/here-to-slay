@@ -1,0 +1,149 @@
+.roll-feedback {
+  position: fixed;
+  top: 1.25rem;
+  left: 50%;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.roll-feedback--modifier {
+  border-color: var(--accent-border);
+  box-shadow:
+    var(--shadow),
+    0 0 0 2px var(--accent-bg);
+}
+
+.roll-feedback__dice {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
+.roll-feedback__sum {
+  font-size: 1.25rem;
+}
+
+.roll-feedback__base {
+  font-size: 0.85rem;
+  color: var(--text);
+  font-weight: normal;
+}
+
+.roll-feedback__modifier {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.roll-feedback__timer {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.roll-feedback__indicators {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.roll-feedback__dot {
+  display: block;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  box-shadow: var(--shadow);
+}
+
+.roll-feedback__dot--green {
+  background: #22c55e;
+}
+
+.roll-feedback__dot--red {
+  background: #ef4444;
+}
+
+.roll-feedback__dot--gray {
+  background: #9ca3af;
+}
+
+.roll-feedback__context {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.roll-feedback__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.roll-feedback__modifiers {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  max-height: 4rem;
+  overflow-y: auto;
+}
+
+.roll-feedback__fail-text {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #ef4444;
+  letter-spacing: 0.08em;
+}
+
+.roll-feedback__success-text {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #22c55e;
+  letter-spacing: 0.06em;
+}
+
+.roll-feedback--challenge .roll-feedback__challenge-rolls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.roll-feedback__challenge-side {
+  min-width: 140px;
+  text-align: center;
+}
+
+.roll-feedback__challenge-name {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.roll-feedback__vs {
+  align-self: center;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.roll-feedback__modifiers--inline {
+  padding-left: 0;
+  list-style: none;
+  max-height: none;
+}

@@ -1,0 +1,33 @@
+.active-monsters {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  justify-content: center;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.active-monsters__slot {
+  flex-shrink: 0;
+}
+
+.active-monsters__btn {
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.active-monsters__btn:hover {
+  border-color: var(--accent-border);
+  transform: translateY(-2px);
+}
+
+.active-monsters__empty {
+  margin: 0;
+  color: var(--text);
+  text-align: center;
+}

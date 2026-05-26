@@ -1,0 +1,22 @@
+.card-hover-preview {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  border-radius: 10px;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.45),
+    0 0 0 2px rgba(255, 255, 255, 0.12);
+  background: #1a1a1a;
+  line-height: 0;
+}
+
+.card-hover-preview img {
+  display: block;
+  width: 280px;
+  height: auto;
+  border-radius: 10px;
+}
+
+.card-hover-preview--large img {
+  width: 320px;
+}
