@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import ActiveMonsters from './components/ActiveMonsters.jsx'
 import CardDisplay from './components/CardDisplay.jsx'
+import DebugPanel from './components/DebugPanel.jsx'
 import DeckPile from './components/DeckPile.jsx'
 import EffectTargetDialog from './components/EffectTargetDialog.jsx'
 import ModifierChoiceDialog from './components/ModifierChoiceDialog.jsx'
@@ -9,6 +10,11 @@ import PartyBoard from './components/PartyBoard.jsx'
 import RollFeedback from './components/RollFeedback.jsx'
 import SkillConfirmDialog from './components/SkillConfirmDialog.jsx'
 import { CARD_BACKS, CARD_TYPES } from './data/cardUtils.js'
+import {
+  debugDrawCardToHand,
+  loadDebugModeEnabled,
+  saveDebugModeEnabled,
+} from './debugMode.js'
 import { getModifierEffect } from './data/modifierEffects.js'
 import { canDrawFromMainDeck } from './deckHelpers.js'
 import {
@@ -16,13 +22,16 @@ import {
   RESTOCK_HAND_ACTION_NAME,
   attackMonster,
   discardForPendingDiscard,
+  passPendingDiscard,
   drawCard,
   endTurn,
   getChallengeDefenderIndex,
   isChallengeWindowActive,
   isEffectTargetSelectionActive,
   isModifierPhaseActive,
+  isPartyClickableForSelection,
   isPendingDiscardActive,
+  isPendingHeroSelectionActive,
   isPlayableFromHand,
   passChallengeWindow,
   passModifierPhaseWithResult,
@@ -32,6 +41,7 @@ import {
   playModifierOnPendingRoll,
   restockHand,
   selectEffectTarget,
+  selectHeroForPendingAction,
   triggerHeroSkill,
 } from './gameActions.js'
 import {
@@ -55,14 +65,24 @@ function App() {
   const [itemEquipInstanceId, setItemEquipInstanceId] = useState(
     /** @type {string | null} */ (null),
   )
+  const [debugMode, setDebugMode] = useState(() => loadDebugModeEnabled())
+  const [debugMessage, setDebugMessage] = useState(
+    /** @type {string | null} */ (null),
+  )
 
   const currentPlayer = game.players[game.currentPlayerIndex]
   const modifierPhase = isModifierPhaseActive(game)
   const challengePhase = isChallengeWindowActive(game)
   const targetSelectionPhase = isEffectTargetSelectionActive(game)
   const pendingDiscardPhase = isPendingDiscardActive(game)
+  const heroSelectionPhase = isPendingHeroSelectionActive(game)
+  const heroSelection = game.pendingHeroSelection
   const interruptPhase =
-    modifierPhase || challengePhase || targetSelectionPhase || pendingDiscardPhase
+    modifierPhase ||
+    challengePhase ||
+    targetSelectionPhase ||
+    pendingDiscardPhase ||
+    heroSelectionPhase
   const canPlay = game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId
   const canDraw =
     !interruptPhase &&
@@ -116,6 +136,7 @@ function App() {
       return undefined
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setChallengeSecondsLeft(Math.ceil(CHALLENGE_WINDOW_MS / 1000))
 
     const interval = window.setInterval(() => {
@@ -146,6 +167,7 @@ function App() {
       return undefined
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDisplayRoll(game.pendingRoll)
     setModifierSecondsLeft(Math.ceil(MODIFIER_WINDOW_MS / 1000))
 
@@ -384,6 +406,18 @@ function App() {
     }
   }
 
+  function handlePassPendingDiscard() {
+    const { game: nextGame, error } = passPendingDiscard(
+      game,
+      game.currentPlayerIndex,
+    )
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+  }
+
   function handleDrawCard() {
     const { game: nextGame, error } = drawCard(game)
     if (error) {
@@ -391,6 +425,34 @@ function App() {
       return
     }
     setGame(nextGame)
+  }
+
+  function handleToggleDebugMode() {
+    setDebugMode((prev) => {
+      const next = !prev
+      saveDebugModeEnabled(next)
+      if (!next) {
+        setDebugMessage(null)
+      }
+      return next
+    })
+  }
+
+  function handleDebugDraw(cardQuery, source) {
+    const { game: nextGame, card, error } = debugDrawCardToHand(game, {
+      cardQuery,
+      source,
+    })
+    if (error) {
+      setDebugMessage(error)
+      return
+    }
+    setGame(nextGame)
+    setDebugMessage(
+      `Added ${card?.name ?? cardQuery} from ${
+        source === 'discardPile' ? 'discard pile' : 'main deck'
+      }.`,
+    )
   }
 
   function handleRestockHand() {
@@ -426,10 +488,24 @@ function App() {
     setItemEquipInstanceId(null)
   }
 
-  function handleHeroSkillClick(hero) {
-    if (!canPlay) {
+  function handleHeroSkillClick(hero, partyOwnerIndex) {
+    if (heroSelectionPhase) {
+      const { game: nextGame, error } = selectHeroForPendingAction(
+        game,
+        partyOwnerIndex,
+        hero.instanceId,
+      )
+      if (error) {
+        window.alert(error)
+        return
+      }
+      setGame(nextGame)
       return
     }
+
+    if (!canPlay) return
+    if (partyOwnerIndex !== game.currentPlayerIndex) return
+
     const slot = currentPlayer.partySlots.find(
       (s) => s?.hero.instanceId === hero.instanceId,
     )
@@ -505,11 +581,35 @@ function App() {
       {pendingDiscardPhase && pendingDiscard && discardingPlayer && (
         <div className="modifier-phase-bar challenge-phase-bar">
           <p className="challenge-phase-bar__text">
-            <strong>{discardingPlayer.name}</strong>: discard{' '}
-            <strong>{pendingDiscard.count}</strong> card
-            {pendingDiscard.count === 1 ? '' : 's'} (from{' '}
-            <strong>{pendingDiscard.sourceLabel}</strong>). Click a card in your hand.
+            <strong>{discardingPlayer.name}</strong>:
+            {pendingDiscard.optional ? (
+              <>
+                {' '}
+                discard up to <strong>{pendingDiscard.count}</strong> more card
+                {pendingDiscard.count === 1 ? '' : 's'} (from{' '}
+                <strong>{pendingDiscard.sourceLabel}</strong>). Click a card in
+                your hand, or Pass to stop.
+              </>
+            ) : (
+              <>
+                {' '}
+                discard <strong>{pendingDiscard.count}</strong> card
+                {pendingDiscard.count === 1 ? '' : 's'} (from{' '}
+                <strong>{pendingDiscard.sourceLabel}</strong>). Click a card in
+                your hand.
+              </>
+            )}
           </p>
+          {pendingDiscard.optional &&
+            game.currentPlayerIndex === pendingDiscard.playerIndex && (
+              <button
+                type="button"
+                className="game-actions__btn game-actions__btn--primary"
+                onClick={handlePassPendingDiscard}
+              >
+                Pass (stop discarding)
+              </button>
+            )}
         </div>
       )}
 
@@ -576,8 +676,21 @@ function App() {
           {pendingDiscardPhase && (
             <span className="game-header__warn">
               {' '}
-              — {discardingPlayer?.name ?? 'Player'} must discard{' '}
-              {pendingDiscard?.count}
+              — {discardingPlayer?.name ?? 'Player'}
+              {pendingDiscard?.optional
+                ? ` may discard up to ${pendingDiscard.count} (or Pass)`
+                : ` must discard ${pendingDiscard?.count}`}
+            </span>
+          )}
+          {heroSelectionPhase && heroSelection && (
+            <span className="game-header__warn">
+              {' '}
+              — {game.players[heroSelection.sourcePlayerIndex]?.name}: pick a
+              hero ({heroSelection.scope === 'own'
+                ? 'your party'
+                : heroSelection.scope === 'opponents'
+                  ? "an opponent's party"
+                  : 'any party'}) to {heroSelection.action} ({heroSelection.sourceLabel})
             </span>
           )}
         </p>
@@ -608,8 +721,20 @@ function App() {
           >
             End turn
           </button>
+          <button
+            type="button"
+            className={`game-actions__btn debug-toggle${debugMode ? ' debug-toggle--on' : ''}`}
+            onClick={handleToggleDebugMode}
+            title="Toggle debug tools (saved in this browser)"
+          >
+            Debug {debugMode ? 'ON' : 'OFF'}
+          </button>
         </div>
       </header>
+
+      {debugMode && (
+        <DebugPanel onDraw={handleDebugDraw} lastMessage={debugMessage} />
+      )}
 
       <div className="deck-zones">
         <section className="game-section game-section--deck">
@@ -673,51 +798,89 @@ function App() {
         </div>
       </section>
 
-      <section className="game-section">
-        <h2>{currentPlayer.name}&apos;s party</h2>
-        <p className="game-section__hint">
-          {itemEquipInstanceId
-            ? 'Click a hero below to equip your item (1 AP).'
-            : 'Click a hero to trigger skill (1 AP, once per turn). Hero / Item / Magic open a challenge window for the opponent.'}
-        </p>
-        <PartyBoard
-          leader={currentPlayer.leader}
-          leaderItems={currentPlayer.leaderItems ?? []}
-          partySlots={currentPlayer.partySlots}
-          slainMonsters={currentPlayer.slainMonsters}
-          onHeroSkillClick={handleHeroSkillClick}
-          heroSkillClickable={canPlay}
-          onHeroEquipClick={handleHeroEquipClick}
-          heroEquipSelectable={itemEquipInstanceId !== null}
-        />
-      </section>
+      {game.players.map((player, playerIndex) => {
+        const isCurrent = playerIndex === game.currentPlayerIndex
+        const partyClickableForSelection =
+          heroSelectionPhase &&
+          isPartyClickableForSelection(game, playerIndex)
+        const selectionMode = partyClickableForSelection
+          ? heroSelection?.action ?? null
+          : null
+
+        return (
+          <section key={`party-${player.id}`} className="game-section">
+            <h2>
+              {player.name}&apos;s party
+              {isCurrent && ' (current)'}
+              {partyClickableForSelection &&
+                ` — pick a hero to ${selectionMode}`}
+            </h2>
+            <PartyBoard
+              leader={player.leader}
+              leaderItems={player.leaderItems ?? []}
+              partySlots={player.partySlots}
+              slainMonsters={player.slainMonsters}
+              onHeroSkillClick={(hero) => handleHeroSkillClick(hero, playerIndex)}
+              heroSkillClickable={
+                (isCurrent && canPlay) || partyClickableForSelection
+              }
+              allowHeroClickWhenSkillUsed={partyClickableForSelection}
+              onHeroEquipClick={
+                isCurrent && itemEquipInstanceId !== null && !heroSelectionPhase
+                  ? handleHeroEquipClick
+                  : undefined
+              }
+              heroEquipSelectable={
+                isCurrent &&
+                itemEquipInstanceId !== null &&
+                !heroSelectionPhase
+              }
+              selectionMode={selectionMode}
+            />
+          </section>
+        )
+      })}
 
       {game.players.map((player, playerIndex) => (
-        <section key={player.id} className="game-section">
+        <section key={`hand-${player.id}`} className="game-section">
           <h2>
             {player.name}&apos;s hand
             {playerIndex === game.currentPlayerIndex && ' (current)'}
           </h2>
           <p className="game-section__hint">
-            {pendingDiscardPhase
-              ? playerIndex === pendingDiscard.playerIndex
-                ? `Discard ${pendingDiscard.count} card${pendingDiscard.count === 1 ? '' : 's'}: click cards below.`
-                : 'Waiting for opponent to discard.'
-              : targetSelectionPhase
-                ? playerIndex === effectSel.sourcePlayerIndex
-                  ? 'Choose which player receives your hero effect.'
-                  : 'Waiting for opponent to choose a target.'
-                : modifierPhase
-                  ? game.pendingRoll?.rollType === 'challenge'
-                    ? 'Any player: play Modifiers and choose which roll to change, or Pass.'
-                    : 'Any player: click Modifiers to change the roll. Play as many as you want, or Pass.'
-                  : challengePhase
-                    ? playerIndex === challengeDefenderIndex
-                      ? 'Play a Challenge card, or Pass.'
-                      : 'Waiting for opponent to Challenge or Pass.'
-                    : playerIndex === game.currentPlayerIndex
-                      ? 'Hero / Magic (1 AP, then challenge). Item: click item, then a hero. Draw (1 AP). Restock (3 AP).'
-                      : 'Waiting for your turn.'}
+            {heroSelectionPhase && heroSelection
+              ? playerIndex === heroSelection.sourcePlayerIndex
+                ? `Pick a hero on ${
+                    heroSelection.scope === 'own'
+                      ? 'your party'
+                      : heroSelection.scope === 'opponents'
+                        ? "an opponent's party"
+                        : 'any party'
+                  } to ${heroSelection.action}.`
+                : `Waiting for ${
+                    game.players[heroSelection.sourcePlayerIndex]?.name
+                  } to pick a hero.`
+              : pendingDiscardPhase
+                ? playerIndex === pendingDiscard.playerIndex
+                  ? pendingDiscard.optional
+                    ? `Discard up to ${pendingDiscard.count} more card${pendingDiscard.count === 1 ? '' : 's'} (click below or Pass).`
+                    : `Discard ${pendingDiscard.count} card${pendingDiscard.count === 1 ? '' : 's'}: click cards below.`
+                  : 'Waiting for opponent to discard.'
+                : targetSelectionPhase
+                  ? playerIndex === effectSel.sourcePlayerIndex
+                    ? 'Choose which player receives your hero effect.'
+                    : 'Waiting for opponent to choose a target.'
+                  : modifierPhase
+                    ? game.pendingRoll?.rollType === 'challenge'
+                      ? 'Any player: play Modifiers and choose which roll to change, or Pass.'
+                      : 'Any player: click Modifiers to change the roll. Play as many as you want, or Pass.'
+                    : challengePhase
+                      ? playerIndex === challengeDefenderIndex
+                        ? 'Play a Challenge card, or Pass.'
+                        : 'Waiting for opponent to Challenge or Pass.'
+                      : playerIndex === game.currentPlayerIndex
+                        ? 'Hero / Magic (1 AP, then challenge). Item: click item, then a hero. Draw (1 AP). Restock (3 AP).'
+                        : 'Waiting for your turn.'}
           </p>
           <div className="card-row hand-row">
             {player.hand.length === 0 ? (

@@ -7,9 +7,11 @@ import './PartySlot.css'
  *   items?: import('../gameState.js').CardInstance[]
  *   skillUsedThisTurn?: boolean
  *   onHeroClick?: (hero: import('../gameState.js').CardInstance) => void
+ *   allowHeroClickWhenSkillUsed?: boolean
  *   heroClickable?: boolean
  *   onHeroEquipClick?: (hero: import('../gameState.js').CardInstance) => void
  *   heroEquipSelectable?: boolean
+ *   selectionMode?: 'destroy' | 'steal' | 'sacrifice' | null
  * }} props
  */
 function PartySlot({
@@ -17,14 +19,31 @@ function PartySlot({
   items = [],
   skillUsedThisTurn = false,
   onHeroClick,
+  allowHeroClickWhenSkillUsed = false,
   heroClickable = false,
   onHeroEquipClick,
   heroEquipSelectable = false,
+  selectionMode = null,
 }) {
   const canEquipItem =
     heroEquipSelectable && onHeroEquipClick
   const canTriggerSkill =
-    !canEquipItem && heroClickable && onHeroClick && !skillUsedThisTurn
+    !canEquipItem &&
+    heroClickable &&
+    onHeroClick &&
+    (allowHeroClickWhenSkillUsed || !skillUsedThisTurn)
+
+  const selectionClass = selectionMode
+    ? ` party-slot__hero-btn--select party-slot__hero-btn--select-${selectionMode}`
+    : ''
+  const selectionTitle =
+    selectionMode === 'destroy'
+      ? `Destroy ${hero.name}`
+      : selectionMode === 'steal'
+        ? `Steal ${hero.name}`
+        : selectionMode === 'sacrifice'
+          ? `Sacrifice ${hero.name}`
+          : `Trigger ${hero.name}'s skill (1 AP)`
 
   return (
     <div className="party-slot">
@@ -41,9 +60,9 @@ function PartySlot({
         ) : canTriggerSkill ? (
           <button
             type="button"
-            className="party-slot__hero-btn"
+            className={`party-slot__hero-btn${selectionClass}`}
             onClick={() => onHeroClick(hero)}
-            title={`Trigger ${hero.name}'s skill (1 AP)`}
+            title={selectionTitle}
           >
             <CardDisplay card={hero} faceUp={hero.faceUp ?? true} />
           </button>

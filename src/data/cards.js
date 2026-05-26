@@ -62,14 +62,22 @@ function createHeroCard(id, filename, heroClass, options = {}) {
 /** 英雄卡（玩家抽牌库组成部分） */
 export const heroCardsByClass = {
   [HERO_CLASSES.FIGHTER]: [
-    createHeroCard('027', 'HtS-Base-027-Hero-Fighter.png', HERO_CLASSES.FIGHTER),
+    createHeroCard('Pan Chucks', 'HtS-Base-027-Hero-Fighter.png', HERO_CLASSES.FIGHTER, {
+      rollRequirement: 8,
+      effectId: 'panChucks',
+      effect: 'Draw 2 cards. If at least one is a Challenge card, destroy a Hero.',
+    }),
     createHeroCard('Heavy Bear', 'HtS-Base-028-Hero-Fighter.png', HERO_CLASSES.FIGHTER, {
       rollRequirement: 5,
       targeted: true,
       effectId: 'heavyBear',
       effect: 'Choose a player. That player discards 2 cards.',
     }),
-    createHeroCard('029', 'HtS-Base-029-Hero-Fighter.png', HERO_CLASSES.FIGHTER),
+    createHeroCard('Qi Bear', 'HtS-Base-029-Hero-Fighter.png', HERO_CLASSES.FIGHTER, {
+      rollRequirement: 10,
+      effectId: 'qiBear',
+      effect: 'Discard up to 3 cards. For each card discarded, destroy a Hero.',
+    }),
     createHeroCard('030', 'HtS-Base-030-Hero-Fighter.png', HERO_CLASSES.FIGHTER),
     createHeroCard('031', 'HtS-Base-031-Hero-Fighter.png', HERO_CLASSES.FIGHTER),
     createHeroCard('032', 'HtS-Base-032-Hero-Fighter.png', HERO_CLASSES.FIGHTER),

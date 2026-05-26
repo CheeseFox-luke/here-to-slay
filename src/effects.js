@@ -78,44 +78,70 @@ export function discard(game, { playerIndex, instanceId }) {
 }
 
 /**
- * remove one of your own heroes from your party and send it to the discard pile.
- * (any equipped items go with it).
+ * Internal: move a hero (with its items) from a player's party to the discard pile.
+ * Both `sacrifice` and `destroy` share this; they differ only in who is allowed to
+ * pick the hero (own vs opponent), which is enforced at the action / pending-selection
+ * layer, not here.
+ *
  * @param {GameState} game
- * @param {{ playerIndex: number, heroInstanceId: string }} params
+ * @param {number} ownerPlayerIndex
+ * @param {string} heroInstanceId
  */
-export function sacrifice(game, { playerIndex, heroInstanceId }) {
-  const player = game.players[playerIndex]
-  if (!player) {
+function removeHeroToDiscard(game, ownerPlayerIndex, heroInstanceId) {
+  const owner = game.players[ownerPlayerIndex]
+  if (!owner) {
     return { game, error: 'Invalid player.' }
   }
-  const slotIndex = player.partySlots.findIndex(
+  const slotIndex = owner.partySlots.findIndex(
     (s) => s?.hero.instanceId === heroInstanceId,
   )
   if (slotIndex === -1) {
-    return { game, error: 'Hero not in your party.' }
+    return { game, error: 'Hero not in that party.' }
   }
-  const slot = player.partySlots[slotIndex]
-  const partySlots = clonePartySlots(player.partySlots)
+  const slot = owner.partySlots[slotIndex]
+  const partySlots = clonePartySlots(owner.partySlots)
   partySlots[slotIndex] = null
   const discarded = [
     withFaceUp(slot.hero),
     ...slot.items.map((c) => withFaceUp(c)),
   ]
   const discardPile = [...game.discardPile, ...discarded]
-  const next = { ...updatePlayer(game, playerIndex, { partySlots }), discardPile }
+  const next = {
+    ...updatePlayer(game, ownerPlayerIndex, { partySlots }),
+    discardPile,
+  }
   return { game: next, discarded }
 }
 
 /**
- * remove another player's hero from their party and send it to the discard pile.
+ * SACRIFICE: a player sends one of *their own* heroes to the discard pile.
+ * `playerIndex` here is both the source AND the owner of the hero. The scope
+ * restriction (only your own heroes) is the caller's responsibility.
+ *
  * @param {GameState} game
- * @param {{ targetPlayerIndex: number, heroInstanceId: string }} params
+ * @param {{ playerIndex: number, heroInstanceId: string }} params
  */
-export function destroy(game, { targetPlayerIndex, heroInstanceId }) {
-  return sacrifice(game, {
-    playerIndex: targetPlayerIndex,
-    heroInstanceId,
-  })
+export function sacrifice(game, { playerIndex, heroInstanceId }) {
+  return removeHeroToDiscard(game, playerIndex, heroInstanceId)
+}
+
+/**
+ * DESTROY: a player sends a hero owned by a *different* player to the discard pile.
+ * `sourcePlayerIndex` is who's running the effect; `targetPlayerIndex` is the
+ * victim. If they are the same, this is rejected — use `sacrifice` instead.
+ *
+ * @param {GameState} game
+ * @param {{
+ *   sourcePlayerIndex: number,
+ *   targetPlayerIndex: number,
+ *   heroInstanceId: string,
+ * }} params
+ */
+export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstanceId }) {
+  if (sourcePlayerIndex === targetPlayerIndex) {
+    return { game, error: 'Use sacrifice to remove your own hero.' }
+  }
+  return removeHeroToDiscard(game, targetPlayerIndex, heroInstanceId)
 }
 
 /**
@@ -221,60 +247,3 @@ export function searchDiscardPile(game, { playerIndex, instanceId }) {
   return { game: next, card }
 }
 
-/* ------------------------------------------------------ *
- * Card effects (composed from atomic effects + UI prompts) *
- * ------------------------------------------------------ */
-
-/**
- * Heavy Bear: target player discards 2 cards (or their entire hand if fewer).
- * Sets up a `pendingDiscard` that the target player resolves card-by-card.
- *
- * @param {GameState} game
- * @param {{ sourcePlayerIndex: number, targetPlayerIndex: number, sourceLabel?: string }} params
- */
-export function heavyBearEffect(game, { sourcePlayerIndex, targetPlayerIndex, sourceLabel = 'Heavy Bear' }) {
-  const target = game.players[targetPlayerIndex]
-  if (!target) {
-    return { game, error: 'Invalid target.' }
-  }
-  const count = Math.min(2, target.hand.length)
-  if (count === 0) {
-    return { game }
-  }
-  return {
-    game: {
-      ...game,
-      pendingDiscard: {
-        playerIndex: targetPlayerIndex,
-        sourcePlayerIndex,
-        count,
-        sourceLabel,
-      },
-    },
-  }
-}
-
-/** @type {Record<string, (game: GameState, params: any) => { game: GameState, error?: string }>} */
-const CARD_EFFECTS = {
-  heavyBear: heavyBearEffect,
-}
-
-/**
- * @param {string} effectId
- */
-export function getCardEffect(effectId) {
-  return CARD_EFFECTS[effectId] ?? null
-}
-
-/**
- * @param {GameState} game
- * @param {string} effectId
- * @param {any} params
- */
-export function runCardEffect(game, effectId, params) {
-  const fn = getCardEffect(effectId)
-  if (!fn) {
-    return { game, error: `Unknown effect: ${effectId}` }
-  }
-  return fn(game, params)
-}

@@ -11,7 +11,13 @@ import {
   rollForHeroEffect,
   rollForMonsterAttack,
 } from './dice.js'
-import { discard as discardEffect, runCardEffect } from './effects.js'
+import { runCardEffect } from './cardEffects.js'
+import {
+  destroy as destroyEffect,
+  discard as discardEffect,
+  sacrifice as sacrificeEffect,
+  steal as stealEffect,
+} from './effects.js'
 import {
   ATTACK_MONSTER_AP_COST,
   DRAW_CARD_AP_COST,
@@ -69,13 +75,41 @@ export function isPendingDiscardActive(game) {
 /**
  * @param {GameState} game
  */
+export function isPendingHeroSelectionActive(game) {
+  return game.pendingHeroSelection !== null
+}
+
+/**
+ * @param {GameState} game
+ */
 export function isInterruptPhaseActive(game) {
   return (
     isChallengeWindowActive(game) ||
     isModifierPhaseActive(game) ||
     isEffectTargetSelectionActive(game) ||
-    isPendingDiscardActive(game)
+    isPendingDiscardActive(game) ||
+    isPendingHeroSelectionActive(game)
   )
+}
+
+/**
+ * Is the given party (owned by `partyOwnerIndex`) a valid pick target for the
+ * currently-open hero selection?
+ * @param {GameState} game
+ * @param {number} partyOwnerIndex
+ */
+export function isPartyClickableForSelection(game, partyOwnerIndex) {
+  const sel = game.pendingHeroSelection
+  if (!sel) {
+    return false
+  }
+  if (sel.scope === 'own') {
+    return partyOwnerIndex === sel.sourcePlayerIndex
+  }
+  if (sel.scope === 'opponents') {
+    return partyOwnerIndex !== sel.sourcePlayerIndex
+  }
+  return true
 }
 
 /**
@@ -98,6 +132,10 @@ export function isPlayableFromHand(card, game, playerIndex) {
         (c) => c.instanceId === card.instanceId,
       )
     )
+  }
+
+  if (isPendingHeroSelectionActive(game)) {
+    return false
   }
 
   if (isEffectTargetSelectionActive(game)) {
@@ -824,6 +862,101 @@ export function selectEffectTarget(game, targetPlayerIndex) {
 }
 
 /**
+ * Source player clicked a hero in some party while a `pendingHeroSelection`
+ * is open. Validates the click against the selection's scope and runs the
+ * appropriate atomic effect (sacrifice / destroy / steal), then clears the
+ * selection.
+ *
+ * @param {GameState} game
+ * @param {number} partyOwnerIndex - whose party the picked hero belongs to
+ * @param {string} heroInstanceId
+ */
+export function selectHeroForPendingAction(game, partyOwnerIndex, heroInstanceId) {
+  const sel = game.pendingHeroSelection
+  if (!sel) {
+    return { game, error: 'No hero selection pending.' }
+  }
+  if (!isPartyClickableForSelection(game, partyOwnerIndex)) {
+    if (sel.scope === 'own') {
+      return { game, error: 'You must pick one of your own heroes.' }
+    }
+    if (sel.scope === 'opponents') {
+      return { game, error: "You must pick an opponent's hero." }
+    }
+    return { game, error: 'Invalid party.' }
+  }
+
+  /** @type {{ game: GameState, error?: string }} */
+  let result
+  if (sel.action === 'sacrifice') {
+    result = sacrificeEffect(game, {
+      playerIndex: partyOwnerIndex,
+      heroInstanceId,
+    })
+  } else if (sel.action === 'destroy') {
+    // Pan Chucks–style cards have scope: 'any' and may target the source player's
+    // own hero. The atomic `destroy` rejects self-targeting (since semantically
+    // that's a sacrifice). Route automatically — the board operation is identical.
+    if (partyOwnerIndex === sel.sourcePlayerIndex) {
+      result = sacrificeEffect(game, {
+        playerIndex: partyOwnerIndex,
+        heroInstanceId,
+      })
+    } else {
+      result = destroyEffect(game, {
+        sourcePlayerIndex: sel.sourcePlayerIndex,
+        targetPlayerIndex: partyOwnerIndex,
+        heroInstanceId,
+      })
+    }
+  } else if (sel.action === 'steal') {
+    result = stealEffect(game, {
+      sourcePlayerIndex: sel.sourcePlayerIndex,
+      targetPlayerIndex: partyOwnerIndex,
+      heroInstanceId,
+    })
+  } else {
+    return { game, error: `Unknown hero-selection action: ${sel.action}` }
+  }
+
+  if (result.error) {
+    return { game, error: result.error }
+  }
+
+  const continuation = sel.afterPendingDiscard ?? null
+  return {
+    game: {
+      ...result.game,
+      pendingHeroSelection: null,
+      pendingDiscard: continuation,
+    },
+  }
+}
+
+/**
+ * Stop an optional discard early (Qi Bear). Clears pending discard without
+ * triggering further destroys for cards not yet discarded.
+ *
+ * @param {GameState} game
+ * @param {number} playerIndex
+ */
+export function passPendingDiscard(game, playerIndex) {
+  const pending = game.pendingDiscard
+  if (!pending) {
+    return { game, error: 'No discard in progress.' }
+  }
+  if (!pending.optional) {
+    return { game, error: 'This discard cannot be skipped.' }
+  }
+  if (pending.playerIndex !== playerIndex) {
+    return { game, error: 'Only the discarding player may pass.' }
+  }
+  return {
+    game: { ...game, pendingDiscard: null },
+  }
+}
+
+/**
  * Target player discards one of their cards to satisfy a pending discard.
  * @param {GameState} game
  * @param {number} playerIndex
@@ -845,6 +978,39 @@ export function discardForPendingDiscard(game, playerIndex, instanceId) {
     return { game, error }
   }
   const remaining = pending.count - 1
+
+  // Qi Bear chain: interleave a "destroy a hero" selection after every discard.
+  // The `afterPendingDiscard` continuation carries the remaining discard count
+  // forward so the cycle resumes once the hero is destroyed.
+  if (pending.destroyHeroPerDiscard) {
+    const anyHero = afterDiscard.players.some((p) =>
+      p.partySlots.some((s) => s !== null),
+    )
+    if (!anyHero) {
+      // no targets left — abort the chain gracefully and skip remaining discards
+      return {
+        game: { ...afterDiscard, pendingDiscard: null },
+      }
+    }
+    const continuation =
+      remaining > 0
+        ? { ...pending, count: remaining }
+        : null
+    return {
+      game: {
+        ...afterDiscard,
+        pendingDiscard: null,
+        pendingHeroSelection: {
+          sourcePlayerIndex: pending.sourcePlayerIndex,
+          scope: 'any',
+          action: 'destroy',
+          sourceLabel: pending.sourceLabel,
+          afterPendingDiscard: continuation,
+        },
+      },
+    }
+  }
+
   return {
     game: {
       ...afterDiscard,
@@ -944,5 +1110,6 @@ export function endTurn(game) {
     pendingChallenge: null,
     pendingEffectTargetSelection: null,
     pendingDiscard: null,
+    pendingHeroSelection: null,
   }
 }

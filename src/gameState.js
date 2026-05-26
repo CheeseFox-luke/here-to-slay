@@ -137,6 +137,11 @@ export function partyHasHero(partySlots) {
  * @property {number} sourcePlayerIndex - who initiated the effect
  * @property {number} count - how many more cards still need discarding
  * @property {string} sourceLabel - label shown in the UI (e.g. "Heavy Bear")
+ * @property {boolean} [destroyHeroPerDiscard] - Qi Bear chain: after each
+ *   discard, open a `pendingHeroSelection` to destroy one hero before resuming
+ *   the next discard.
+ * @property {boolean} [optional] - if true, the player may Pass to stop
+ *   discarding early (no further destroys for undiscarded cards).
  */
 
 /**
@@ -145,6 +150,19 @@ export function partyHasHero(partySlots) {
  * @property {string} effectId
  * @property {string} heroName
  * @property {PendingRoll} resumeRoll - pendingRoll to restore once a target is chosen
+ */
+
+/**
+ * Prompt: the source player must click a hero in some other party (or their own).
+ * Used by destroy / steal / sacrifice card effects.
+ *
+ * @typedef {Object} PendingHeroSelection
+ * @property {number} sourcePlayerIndex - the player making the choice
+ * @property {'own' | 'opponents' | 'any'} scope - which parties are valid
+ * @property {'destroy' | 'steal' | 'sacrifice'} action - which atomic effect to run
+ * @property {string} sourceLabel - label shown in the UI (e.g. card name)
+ * @property {PendingDiscard | null} [afterPendingDiscard] - continuation to
+ *   restore as `pendingDiscard` once the selection completes (Qi Bear chain).
  */
 
 /**
@@ -178,6 +196,7 @@ export function partyHasHero(partySlots) {
  * @property {PendingChallengeWindow | null} pendingChallenge
  * @property {PendingEffectTargetSelection | null} pendingEffectTargetSelection
  * @property {PendingDiscard | null} pendingDiscard
+ * @property {PendingHeroSelection | null} pendingHeroSelection
  */
 
 /**
@@ -223,6 +242,7 @@ export const initialGameState = {
   pendingChallenge: null,
   pendingEffectTargetSelection: null,
   pendingDiscard: null,
+  pendingHeroSelection: null,
 }
 
 export const RESTOCK_HAND_AP_COST = 3
@@ -281,5 +301,6 @@ export function initGame(playerCount) {
     pendingChallenge: null,
     pendingEffectTargetSelection: null,
     pendingDiscard: null,
+    pendingHeroSelection: null,
   }
 }

@@ -14,9 +14,11 @@ import './PartyBoard.css'
  *   partySlots: (import('../gameState.js').PartySlot | null)[]
  *   slainMonsters?: import('../gameState.js').CardInstance[]
  *   onHeroSkillClick?: (hero: import('../gameState.js').CardInstance) => void
+ *   allowHeroClickWhenSkillUsed?: boolean
  *   heroSkillClickable?: boolean
  *   onHeroEquipClick?: (hero: import('../gameState.js').CardInstance) => void
  *   heroEquipSelectable?: boolean
+ *   selectionMode?: 'destroy' | 'steal' | 'sacrifice' | null
  * }} props
  */
 function PartyBoard({
@@ -25,9 +27,11 @@ function PartyBoard({
   partySlots,
   slainMonsters = [],
   onHeroSkillClick,
+  allowHeroClickWhenSkillUsed = false,
   heroSkillClickable = false,
   onHeroEquipClick,
   heroEquipSelectable = false,
+  selectionMode = null,
 }) {
   return (
     <div className="party-board">
@@ -51,9 +55,11 @@ function PartyBoard({
                   items={slot.items}
                   skillUsedThisTurn={slot.skillUsedThisTurn}
                   onHeroClick={onHeroSkillClick}
+                  allowHeroClickWhenSkillUsed={allowHeroClickWhenSkillUsed}
                   heroClickable={heroSkillClickable}
                   onHeroEquipClick={onHeroEquipClick}
                   heroEquipSelectable={heroEquipSelectable}
+                  selectionMode={selectionMode}
                 />
               ) : (
                 <div className="party-board__placeholder" aria-hidden />

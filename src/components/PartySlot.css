@@ -33,6 +33,52 @@
   transform: translateY(-3px);
 }
 
+.party-slot__hero-btn--select {
+  animation: party-slot-pulse 1.4s ease-in-out infinite;
+}
+
+.party-slot__hero-btn--select-destroy {
+  border-color: #e74c3c;
+  box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.35);
+}
+
+.party-slot__hero-btn--select-destroy:hover {
+  border-color: #ff7264;
+  box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.55);
+  transform: translateY(-3px);
+}
+
+.party-slot__hero-btn--select-steal {
+  border-color: #f1c40f;
+  box-shadow: 0 0 0 2px rgba(241, 196, 15, 0.35);
+}
+
+.party-slot__hero-btn--select-steal:hover {
+  border-color: #ffdd55;
+  box-shadow: 0 0 0 3px rgba(241, 196, 15, 0.55);
+  transform: translateY(-3px);
+}
+
+.party-slot__hero-btn--select-sacrifice {
+  border-color: #9b59b6;
+  box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.35);
+}
+
+.party-slot__hero-btn--select-sacrifice:hover {
+  border-color: #c47ddc;
+  box-shadow: 0 0 0 3px rgba(155, 89, 182, 0.55);
+  transform: translateY(-3px);
+}
+
+@keyframes party-slot-pulse {
+  0%, 100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.18);
+  }
+}
+
 .party-slot__skill-used {
   position: absolute;
   top: 4px;
