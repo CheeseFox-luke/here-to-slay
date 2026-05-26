@@ -54,6 +54,7 @@ function createHeroCard(id, filename, heroClass, options = {}) {
     ...createCard(id, filename, CARD_TYPES.HERO, heroClass),
     rollRequirement: options.rollRequirement ?? HERO_ROLL_REQUIREMENT,
     targeted: options.targeted ?? false,
+    heroTargeted: options.heroTargeted ?? false,
     ...(options.effectId ? { effectId: options.effectId } : {}),
     ...(options.effect ? { effect: options.effect } : {}),
   }
@@ -78,11 +79,36 @@ export const heroCardsByClass = {
       effectId: 'qiBear',
       effect: 'Discard up to 3 cards. For each card discarded, destroy a Hero.',
     }),
-    createHeroCard('030', 'HtS-Base-030-Hero-Fighter.png', HERO_CLASSES.FIGHTER),
-    createHeroCard('031', 'HtS-Base-031-Hero-Fighter.png', HERO_CLASSES.FIGHTER),
-    createHeroCard('032', 'HtS-Base-032-Hero-Fighter.png', HERO_CLASSES.FIGHTER),
-    createHeroCard('033', 'HtS-Base-033-Hero-Fighter.png', HERO_CLASSES.FIGHTER),
-    createHeroCard('034', 'HtS-Base-034--Hero-Fighter.png', HERO_CLASSES.FIGHTER),
+    createHeroCard('Beary Wise', 'HtS-Base-030-Hero-Fighter.png', HERO_CLASSES.FIGHTER, {
+      rollRequirement: 7,
+      effectId: 'bearyWise',
+      effect:
+        'Each other player discards 1 card. Choose 1 of those cards to add to your hand.',
+    }),
+    createHeroCard('Tough Teddy', 'HtS-Base-031-Hero-Fighter.png', HERO_CLASSES.FIGHTER, {
+      rollRequirement: 4,
+      effectId: 'toughTeddy',
+      effect:
+        'Each other player with a Fighter in their party discards 1 card.',
+    }),
+    createHeroCard('Fury Knuckle', 'HtS-Base-032-Hero-Fighter.png', HERO_CLASSES.FIGHTER, {
+      rollRequirement: 5,
+      targeted: true,
+      effectId: 'furyKnuckle',
+      effect: "Pull a card from another player's hand. If it's a Challenge card, pull another one.",
+    }),
+    createHeroCard('Bear Claw', 'HtS-Base-033-Hero-Fighter.png', HERO_CLASSES.FIGHTER, {
+      rollRequirement: 7,
+      targeted: true,
+      effectId: 'bearClaw',
+      effect: "Pull a card from another player's hand. If it's a Hero card, pull another one.",
+    }),
+    createHeroCard('Bad Axe', 'HtS-Base-034--Hero-Fighter.png', HERO_CLASSES.FIGHTER, {
+      rollRequirement: 8,
+      heroTargeted: true,
+      effectId: 'badAxe',
+      effect: 'Destroy a Hero.',
+    }),
   ],
   [HERO_CLASSES.BARD]: [
     createHeroCard('035', 'HtS-Base-035-Hero-Bard.png', HERO_CLASSES.BARD),

@@ -12,6 +12,8 @@ import './PartySlot.css'
  *   onHeroEquipClick?: (hero: import('../gameState.js').CardInstance) => void
  *   heroEquipSelectable?: boolean
  *   selectionMode?: 'destroy' | 'steal' | 'sacrifice' | null
+ *   pendingDestroyMode?: boolean
+ *   pendingDestroy?: boolean
  * }} props
  */
 function PartySlot({
@@ -24,11 +26,15 @@ function PartySlot({
   onHeroEquipClick,
   heroEquipSelectable = false,
   selectionMode = null,
+  pendingDestroyMode = false,
+  pendingDestroy = false,
 }) {
   const canEquipItem =
     heroEquipSelectable && onHeroEquipClick
+  const canPendingDestroyTarget = !canEquipItem && pendingDestroyMode && onHeroClick
   const canTriggerSkill =
     !canEquipItem &&
+    !canPendingDestroyTarget &&
     heroClickable &&
     onHeroClick &&
     (allowHeroClickWhenSkillUsed || !skillUsedThisTurn)
@@ -57,6 +63,19 @@ function PartySlot({
           >
             <CardDisplay card={hero} faceUp={hero.faceUp ?? true} />
           </button>
+        ) : canPendingDestroyTarget ? (
+          <button
+            type="button"
+            className={`party-slot__hero-btn party-slot__hero-btn--select${
+              pendingDestroy
+                ? ' party-slot__hero-btn--pending-destroy-selected'
+                : ' party-slot__hero-btn--pending-destroy-target'
+            }`}
+            onClick={() => onHeroClick(hero)}
+            title={pendingDestroy ? `Deselect ${hero.name}` : `Select ${hero.name} to destroy`}
+          >
+            <CardDisplay card={hero} faceUp={hero.faceUp ?? true} />
+          </button>
         ) : canTriggerSkill ? (
           <button
             type="button"
@@ -66,6 +85,10 @@ function PartySlot({
           >
             <CardDisplay card={hero} faceUp={hero.faceUp ?? true} />
           </button>
+        ) : pendingDestroy ? (
+          <div className="party-slot__hero-pending-destroy-mark">
+            <CardDisplay card={hero} faceUp={hero.faceUp ?? true} />
+          </div>
         ) : (
           <CardDisplay card={hero} faceUp={hero.faceUp ?? true} />
         )}

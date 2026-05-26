@@ -78,6 +78,27 @@ export function discard(game, { playerIndex, instanceId }) {
 }
 
 /**
+ * Remove a card from a player's hand without sending it to the discard pile.
+ * Used when cards are staged (e.g. Beary Wise) before a later resolution.
+ *
+ * @param {GameState} game
+ * @param {{ playerIndex: number, instanceId: string }} params
+ */
+export function removeCardFromHand(game, { playerIndex, instanceId }) {
+  const player = game.players[playerIndex]
+  if (!player) {
+    return { game, error: 'Invalid player.' }
+  }
+  const card = player.hand.find((c) => c.instanceId === instanceId)
+  if (!card) {
+    return { game, error: 'Card not in hand.' }
+  }
+  const hand = player.hand.filter((c) => c.instanceId !== instanceId)
+  const next = updatePlayer(game, playerIndex, { hand })
+  return { game: next, card: withFaceUp(card) }
+}
+
+/**
  * Internal: move a hero (with its items) from a player's party to the discard pile.
  * Both `sacrifice` and `destroy` share this; they differ only in who is allowed to
  * pick the hero (own vs opponent), which is enforced at the action / pending-selection
@@ -184,6 +205,48 @@ export function steal(game, { sourcePlayerIndex, targetPlayerIndex, heroInstance
   let next = updatePlayer(game, targetPlayerIndex, { partySlots: targetSlots })
   next = updatePlayer(next, sourcePlayerIndex, { partySlots: sourceSlots })
   return { game: next, stolen }
+}
+
+/**
+ * Take a specific card from another player's hand into your own hand.
+ * @param {GameState} game
+ * @param {{
+ *   sourcePlayerIndex: number,
+ *   targetPlayerIndex: number,
+ *   instanceId: string,
+ * }} params
+ */
+export function take(game, { sourcePlayerIndex, targetPlayerIndex, instanceId }) {
+  const source = game.players[sourcePlayerIndex]
+  const target = game.players[targetPlayerIndex]
+  if (!source || !target) {
+    return { game, error: 'Invalid players.' }
+  }
+  const card = target.hand.find((c) => c.instanceId === instanceId)
+  if (!card) {
+    return { game, error: "Card not in target's hand." }
+  }
+  const targetHand = target.hand.filter((c) => c.instanceId !== instanceId)
+  const sourceHand = [...source.hand, withFaceUp(card)]
+  let next = updatePlayer(game, targetPlayerIndex, { hand: targetHand })
+  next = updatePlayer(next, sourcePlayerIndex, { hand: sourceHand })
+  return { game: next, card: withFaceUp(card) }
+}
+
+/**
+ * Pull a specific card from another player's hand into your own.
+ * Semantically identical to `take`; exposed under a distinct name for card
+ * effects that describe the action as "pulling" a card.
+ *
+ * @param {GameState} game
+ * @param {{
+ *   sourcePlayerIndex: number,
+ *   targetPlayerIndex: number,
+ *   instanceId: string,
+ * }} params
+ */
+export function pull(game, { sourcePlayerIndex, targetPlayerIndex, instanceId }) {
+  return take(game, { sourcePlayerIndex, targetPlayerIndex, instanceId })
 }
 
 /**

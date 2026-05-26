@@ -70,6 +70,35 @@
   transform: translateY(-3px);
 }
 
+.party-slot__hero-btn--pending-destroy-target {
+  border-color: #e74c3c;
+  box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.35);
+}
+
+.party-slot__hero-btn--pending-destroy-target:hover {
+  border-color: #ff7264;
+  box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.55);
+  transform: translateY(-3px);
+}
+
+.party-slot__hero-btn--pending-destroy-selected {
+  border-color: #ff2c2c;
+  box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.7), 0 0 12px rgba(231, 76, 60, 0.5);
+  animation: none;
+}
+
+.party-slot__hero-btn--pending-destroy-selected:hover {
+  transform: translateY(-2px);
+}
+
+/* 非交互状态下已确认的 destroy 目标 */
+.party-slot__hero-pending-destroy-mark {
+  display: inline-block;
+  border-radius: 8px;
+  border: 2px solid #ff2c2c;
+  box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.7), 0 0 12px rgba(231, 76, 60, 0.5);
+}
+
 @keyframes party-slot-pulse {
   0%, 100% {
     filter: brightness(1);

@@ -19,6 +19,8 @@ import './PartyBoard.css'
  *   onHeroEquipClick?: (hero: import('../gameState.js').CardInstance) => void
  *   heroEquipSelectable?: boolean
  *   selectionMode?: 'destroy' | 'steal' | 'sacrifice' | null
+ *   pendingDestroyMode?: boolean
+ *   pendingDestroyIds?: string[]
  * }} props
  */
 function PartyBoard({
@@ -32,6 +34,8 @@ function PartyBoard({
   onHeroEquipClick,
   heroEquipSelectable = false,
   selectionMode = null,
+  pendingDestroyMode = false,
+  pendingDestroyIds = [],
 }) {
   return (
     <div className="party-board">
@@ -60,6 +64,8 @@ function PartyBoard({
                   onHeroEquipClick={onHeroEquipClick}
                   heroEquipSelectable={heroEquipSelectable}
                   selectionMode={selectionMode}
+                  pendingDestroyMode={pendingDestroyMode}
+                  pendingDestroy={pendingDestroyIds.includes(slot.hero.instanceId)}
                 />
               ) : (
                 <div className="party-board__placeholder" aria-hidden />

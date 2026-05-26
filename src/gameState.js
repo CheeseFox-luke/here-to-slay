@@ -66,6 +66,7 @@ export function partyHasHero(partySlots) {
  * @property {number} [rollRequirement]
  * @property {import('./data/modifierEffects.js').ModifierEffect} [modifierEffect]
  * @property {boolean} [targeted]
+ * @property {boolean} [heroTargeted]
  * @property {string} [effectId]
  * @property {string} [effect]
  */
@@ -94,7 +95,6 @@ export function partyHasHero(partySlots) {
 /**
  * @typedef {Object} PendingChallengeWindow
  * @property {StagedPlay} stagedPlay
- * @property {number} defenderIndex
  */
 
 /**
@@ -124,11 +124,10 @@ export function partyHasHero(partySlots) {
  * @property {boolean} [challengeResolved]
  * @property {boolean} [challengeSuccess]
  * @property {string} [effectId]
- * @property {boolean} [effectTargeted]
  * @property {number} [effectSourcePlayerIndex]
  * @property {number} [effectTargetPlayerIndex]
- * @property {'pre-target' | 'post-target'} [effectPhase]
  * @property {string} [heroName]
+ * @property {number} [qiBearCount]
  */
 
 /**
@@ -142,6 +141,34 @@ export function partyHasHero(partySlots) {
  *   the next discard.
  * @property {boolean} [optional] - if true, the player may Pass to stop
  *   discarding early (no further destroys for undiscarded cards).
+ * @property {'standard' | 'opponentEach' | 'opponentEachPile'} [kind] -
+ *   `opponentEach` (Beary Wise): staged discards; `opponentEachPile` (Tough Teddy):
+ *   normal discard to pile per qualifying opponent.
+ * @property {number[]} [opponentDiscardQueue] - remaining opponents who must discard
+ * @property {CardInstance[]} [stagedCards] - cards held out
+ *   of the discard pile during Beary Wise
+ */
+
+/**
+ * Fury Knuckle / Bear Claw: source player picks a specific card from the
+ * target's face-down hand. If the pulled card matches `bonusTriggerType`,
+ * another pick opens (with `bonusTriggerType: null` — no further bonus).
+ *
+ * @typedef {Object} PendingCardPull
+ * @property {number} sourcePlayerIndex
+ * @property {number} targetPlayerIndex
+ * @property {import('./data/cardUtils.js').CardType | null} bonusTriggerType
+ * @property {string} sourceLabel
+ * @property {boolean} [isBonusPull]
+ */
+
+/**
+ * Beary Wise: source player picks one card from the staged pool.
+ *
+ * @typedef {Object} PendingStagedCardPick
+ * @property {number} sourcePlayerIndex
+ * @property {string} sourceLabel
+ * @property {CardInstance[]} stagedCards
  */
 
 /**
@@ -149,7 +176,33 @@ export function partyHasHero(partySlots) {
  * @property {number} sourcePlayerIndex
  * @property {string} effectId
  * @property {string} heroName
- * @property {PendingRoll} resumeRoll - pendingRoll to restore once a target is chosen
+ * @property {number} rollRequirement
+ */
+
+/**
+ * Pre-roll selection state for hero-targeted effects (e.g. Bad Axe):
+ * player picks a specific hero before the dice are rolled.
+ *
+ * @typedef {Object} PendingEffectHeroTargetSelection
+ * @property {number} sourcePlayerIndex
+ * @property {string} effectId
+ * @property {string} heroName
+ * @property {number} rollRequirement
+ * @property {'own' | 'opponents' | 'any'} scope - which parties contain valid heroes
+ */
+
+/**
+ * Pre-roll selection state for Qi Bear: player chooses how many cards to discard
+ * (0–maxCount) and picks that many heroes to destroy, before the dice are rolled.
+ *
+ * @typedef {Object} PendingQiBearSelection
+ * @property {number} sourcePlayerIndex
+ * @property {string} effectId
+ * @property {string} heroName
+ * @property {number} rollRequirement
+ * @property {number} count - currently chosen discard/destroy count (0..maxCount)
+ * @property {number} maxCount - min(3, hand size at trigger time)
+ * @property {string[]} heroTargets - instanceIds of heroes chosen to destroy
  */
 
 /**
@@ -158,7 +211,9 @@ export function partyHasHero(partySlots) {
  *
  * @typedef {Object} PendingHeroSelection
  * @property {number} sourcePlayerIndex - the player making the choice
- * @property {'own' | 'opponents' | 'any'} scope - which parties are valid
+ * @property {'own' | 'opponents' | 'any' | 'specific'} scope - which parties are valid;
+ *   'specific' restricts to a single player identified by `targetPlayerIndex`
+ * @property {number} [targetPlayerIndex] - required when scope === 'specific'
  * @property {'destroy' | 'steal' | 'sacrifice'} action - which atomic effect to run
  * @property {string} sourceLabel - label shown in the UI (e.g. card name)
  * @property {PendingDiscard | null} [afterPendingDiscard] - continuation to
@@ -195,8 +250,14 @@ export function partyHasHero(partySlots) {
  * @property {PendingRoll | null} pendingRoll
  * @property {PendingChallengeWindow | null} pendingChallenge
  * @property {PendingEffectTargetSelection | null} pendingEffectTargetSelection
+ * @property {PendingEffectHeroTargetSelection | null} pendingEffectHeroTargetSelection
+ * @property {PendingCardPull | null} pendingCardPull
  * @property {PendingDiscard | null} pendingDiscard
+ * @property {PendingStagedCardPick | null} pendingStagedCardPick
  * @property {PendingHeroSelection | null} pendingHeroSelection
+ * @property {PendingQiBearSelection | null} pendingQiBearSelection
+ * @property {string[]} pendingDestroyTargets - instanceIds of heroes currently marked for
+ *   destruction by an in-progress effect; cleared when the effect resolves or the turn ends
  */
 
 /**
@@ -241,8 +302,13 @@ export const initialGameState = {
   pendingRoll: null,
   pendingChallenge: null,
   pendingEffectTargetSelection: null,
+  pendingEffectHeroTargetSelection: null,
+  pendingCardPull: null,
   pendingDiscard: null,
+  pendingStagedCardPick: null,
   pendingHeroSelection: null,
+  pendingQiBearSelection: null,
+  pendingDestroyTargets: [],
 }
 
 export const RESTOCK_HAND_AP_COST = 3
@@ -300,7 +366,12 @@ export function initGame(playerCount) {
     pendingRoll: null,
     pendingChallenge: null,
     pendingEffectTargetSelection: null,
+    pendingEffectHeroTargetSelection: null,
+    pendingCardPull: null,
     pendingDiscard: null,
+    pendingStagedCardPick: null,
     pendingHeroSelection: null,
+    pendingQiBearSelection: null,
+    pendingDestroyTargets: [],
   }
 }

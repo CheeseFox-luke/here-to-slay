@@ -15,6 +15,8 @@ import { runCardEffect } from './cardEffects.js'
 import {
   destroy as destroyEffect,
   discard as discardEffect,
+  pull as pullEffect,
+  removeCardFromHand,
   sacrifice as sacrificeEffect,
   steal as stealEffect,
 } from './effects.js'
@@ -75,8 +77,50 @@ export function isPendingDiscardActive(game) {
 /**
  * @param {GameState} game
  */
+export function isPendingStagedCardPickActive(game) {
+  return game.pendingStagedCardPick !== null
+}
+
+/**
+ * @param {GameState} game
+ */
 export function isPendingHeroSelectionActive(game) {
   return game.pendingHeroSelection !== null
+}
+
+/**
+ * @param {GameState} game
+ */
+export function isEffectHeroTargetSelectionActive(game) {
+  return game.pendingEffectHeroTargetSelection !== null
+}
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingCardPullActive(game) {
+  return game.pendingCardPull !== null
+}
+
+/**
+ * Is the given party a valid pick target for the currently-open
+ * pre-roll hero target selection (Bad Axe style)?
+ * @param {GameState} game
+ * @param {number} partyOwnerIndex
+ */
+export function isPartyClickableForHeroTargetSelection(game, partyOwnerIndex) {
+  const sel = game.pendingEffectHeroTargetSelection
+  if (!sel) return false
+  if (sel.scope === 'own') return partyOwnerIndex === sel.sourcePlayerIndex
+  if (sel.scope === 'opponents') return partyOwnerIndex !== sel.sourcePlayerIndex
+  return true // 'any'
+}
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingQiBearSelectionActive(game) {
+  return game.pendingQiBearSelection !== null
 }
 
 /**
@@ -87,8 +131,12 @@ export function isInterruptPhaseActive(game) {
     isChallengeWindowActive(game) ||
     isModifierPhaseActive(game) ||
     isEffectTargetSelectionActive(game) ||
+    isEffectHeroTargetSelectionActive(game) ||
+    isPendingCardPullActive(game) ||
     isPendingDiscardActive(game) ||
-    isPendingHeroSelectionActive(game)
+    isPendingStagedCardPickActive(game) ||
+    isPendingHeroSelectionActive(game) ||
+    isPendingQiBearSelectionActive(game)
   )
 }
 
@@ -109,14 +157,19 @@ export function isPartyClickableForSelection(game, partyOwnerIndex) {
   if (sel.scope === 'opponents') {
     return partyOwnerIndex !== sel.sourcePlayerIndex
   }
+  if (sel.scope === 'specific') {
+    return partyOwnerIndex === sel.targetPlayerIndex
+  }
   return true
 }
 
 /**
+ * Returns the index of the player whose card play opened the challenge window.
+ * Any other player may respond with a Challenge card.
  * @param {GameState} game
  */
-export function getChallengeDefenderIndex(game) {
-  return game.pendingChallenge?.defenderIndex ?? -1
+export function getChallengeAttackerIndex(game) {
+  return game.pendingChallenge?.stagedPlay.attackerIndex ?? -1
 }
 
 /**
@@ -132,6 +185,10 @@ export function isPlayableFromHand(card, game, playerIndex) {
         (c) => c.instanceId === card.instanceId,
       )
     )
+  }
+
+  if (isPendingStagedCardPickActive(game)) {
+    return false
   }
 
   if (isPendingHeroSelectionActive(game)) {
@@ -155,7 +212,8 @@ export function isPlayableFromHand(card, game, playerIndex) {
     if (card.type !== CARD_TYPES.CHALLENGE) {
       return false
     }
-    return playerIndex === game.pendingChallenge.defenderIndex
+    // Any player except the one who made the play can respond with a Challenge card
+    return playerIndex !== game.pendingChallenge.stagedPlay.attackerIndex
   }
 
   if (playerIndex !== game.currentPlayerIndex) {
@@ -194,7 +252,7 @@ export function resetPartySkillUsage(partySlots) {
 }
 
 /**
- * Attach effect metadata to a fresh hero pendingRoll.
+ * Attach effect metadata to a fresh hero pendingRoll (non-targeted heroes only).
  * @param {PendingRoll} pendingRoll
  * @param {CardInstance} heroCard
  * @param {number} sourcePlayerIndex
@@ -207,40 +265,9 @@ function attachHeroEffectMeta(pendingRoll, heroCard, sourcePlayerIndex) {
     ...(heroCard.effectId
       ? {
           effectId: heroCard.effectId,
-          effectTargeted: heroCard.targeted === true,
           effectSourcePlayerIndex: sourcePlayerIndex,
-          effectPhase: 'pre-target',
         }
       : {}),
-  }
-}
-
-/**
- * If a targeted hero rolled a success on the first try, skip the pre-target
- * modifier window: jump straight to target selection. Otherwise the roll keeps
- * a normal pendingRoll so the modifier window opens.
- * @param {PendingRoll} pendingRoll
- * @returns {{
- *   pendingRoll: PendingRoll | null,
- *   pendingEffectTargetSelection: import('./gameState.js').PendingEffectTargetSelection | null,
- * }}
- */
-function distributeHeroRoll(pendingRoll) {
-  if (!pendingRoll.effectId || !pendingRoll.effectTargeted) {
-    return { pendingRoll, pendingEffectTargetSelection: null }
-  }
-  const success = pendingRoll.currentSum >= (pendingRoll.requirement ?? 6)
-  if (!success) {
-    return { pendingRoll, pendingEffectTargetSelection: null }
-  }
-  return {
-    pendingRoll: null,
-    pendingEffectTargetSelection: {
-      sourcePlayerIndex: pendingRoll.effectSourcePlayerIndex ?? 0,
-      effectId: pendingRoll.effectId,
-      heroName: pendingRoll.heroName ?? 'Hero',
-      resumeRoll: pendingRoll,
-    },
   }
 }
 
@@ -255,6 +282,12 @@ function resolveStagedPlay(game, staged) {
   let discardPile = game.discardPile
   /** @type {PendingRoll | null} */
   let pendingRoll = null
+  /** @type {import('./gameState.js').PendingEffectTargetSelection | null} */
+  let pendingEffectTargetSelection = null
+  /** @type {import('./gameState.js').PendingEffectHeroTargetSelection | null} */
+  let pendingEffectHeroTargetSelection = null
+  /** @type {import('./gameState.js').PendingQiBearSelection | null} */
+  let pendingQiBearSelection = null
 
   const played = withFaceUp(card)
 
@@ -269,11 +302,38 @@ function resolveStagedPlay(game, staged) {
       items: [],
       skillUsedThisTurn: true,
     }
-    const baseRoll = rollForHeroEffect(
-      played.rollRequirement ?? 6,
-      attackerIndex,
-    )
-    pendingRoll = attachHeroEffectMeta(baseRoll, played, attackerIndex)
+    if (played.effectId === 'qiBear') {
+      const maxCount = Math.min(3, game.players[attackerIndex].hand.length)
+      pendingQiBearSelection = {
+        sourcePlayerIndex: attackerIndex,
+        effectId: played.effectId,
+        heroName: played.name,
+        rollRequirement: played.rollRequirement ?? 6,
+        count: 0,
+        maxCount,
+        heroTargets: [],
+      }
+    } else if (played.heroTargeted && played.effectId) {
+      // 先选 hero 目标，再投骰
+      pendingEffectHeroTargetSelection = {
+        sourcePlayerIndex: attackerIndex,
+        effectId: played.effectId,
+        heroName: played.name,
+        rollRequirement: played.rollRequirement ?? 6,
+        scope: 'any',
+      }
+    } else if (played.targeted && played.effectId) {
+      // 先选玩家目标，再投骰
+      pendingEffectTargetSelection = {
+        sourcePlayerIndex: attackerIndex,
+        effectId: played.effectId,
+        heroName: played.name,
+        rollRequirement: played.rollRequirement ?? 6,
+      }
+    } else {
+      const baseRoll = rollForHeroEffect(played.rollRequirement ?? 6, attackerIndex)
+      pendingRoll = attachHeroEffectMeta(baseRoll, played, attackerIndex)
+    }
   } else if (cardType === CARD_TYPES.MAGIC) {
     discardPile = [...discardPile, played]
   } else if (cardType === CARD_TYPES.ITEM) {
@@ -295,17 +355,15 @@ function resolveStagedPlay(game, staged) {
     index === attackerIndex ? { ...p, partySlots } : p,
   )
 
-  const distributed = pendingRoll
-    ? distributeHeroRoll(pendingRoll)
-    : { pendingRoll: null, pendingEffectTargetSelection: null }
-
   return {
     game: {
       ...game,
       players,
       discardPile,
-      pendingRoll: distributed.pendingRoll,
-      pendingEffectTargetSelection: distributed.pendingEffectTargetSelection,
+      pendingRoll,
+      pendingEffectTargetSelection,
+      pendingEffectHeroTargetSelection,
+      pendingQiBearSelection,
     },
     diceRoll: pendingRoll,
     error: null,
@@ -360,7 +418,6 @@ function beginStagedPlay(game, instanceId, itemSlotIndex) {
 
   const played = withFaceUp(card)
   const hand = player.hand.filter((_, index) => index !== handIndex)
-  const defenderIndex = (playerIndex + 1) % game.players.length
 
   /** @type {StagedPlay} */
   const stagedPlay = {
@@ -379,7 +436,7 @@ function beginStagedPlay(game, instanceId, itemSlotIndex) {
       ...game,
       players,
       actionPoints: game.actionPoints - 1,
-      pendingChallenge: { stagedPlay, defenderIndex },
+      pendingChallenge: { stagedPlay },
     },
     error: null,
   }
@@ -449,8 +506,8 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
     return { game, error: 'No play is open for a challenge.' }
   }
 
-  if (challengerIndex !== game.pendingChallenge.defenderIndex) {
-    return { game, error: 'Only the opponent may play a challenge.' }
+  if (challengerIndex === game.pendingChallenge.stagedPlay.attackerIndex) {
+    return { game, error: 'You cannot challenge your own play.' }
   }
 
   const challenger = game.players[challengerIndex]
@@ -577,24 +634,77 @@ export function triggerHeroSkill(game, heroInstanceId) {
   const partySlots = clonePartySlots(player.partySlots)
   partySlots[slotIndex] = { ...slot, skillUsedThisTurn: true }
 
-  const baseRoll = rollForHeroEffect(
-    slot.hero.rollRequirement ?? 6,
-    playerIndex,
-  )
-  const pendingRoll = attachHeroEffectMeta(baseRoll, slot.hero, playerIndex)
-  const distributed = distributeHeroRoll(pendingRoll)
-
   const players = game.players.map((p, index) =>
     index === playerIndex ? { ...p, partySlots } : p,
   )
+
+  if (slot.hero.effectId === 'qiBear') {
+    const maxCount = Math.min(3, player.hand.length)
+    return {
+      game: {
+        ...game,
+        players,
+        actionPoints: game.actionPoints - 1,
+        pendingQiBearSelection: {
+          sourcePlayerIndex: playerIndex,
+          effectId: slot.hero.effectId,
+          heroName: slot.hero.name,
+          rollRequirement: slot.hero.rollRequirement ?? 6,
+          count: 0,
+          maxCount,
+          heroTargets: [],
+        },
+      },
+      diceRoll: null,
+    }
+  }
+
+  if (slot.hero.heroTargeted && slot.hero.effectId) {
+    // 先选 hero 目标，再投骰
+    return {
+      game: {
+        ...game,
+        players,
+        actionPoints: game.actionPoints - 1,
+        pendingEffectHeroTargetSelection: {
+          sourcePlayerIndex: playerIndex,
+          effectId: slot.hero.effectId,
+          heroName: slot.hero.name,
+          rollRequirement: slot.hero.rollRequirement ?? 6,
+          scope: 'any',
+        },
+      },
+      diceRoll: null,
+    }
+  }
+
+  if (slot.hero.targeted && slot.hero.effectId) {
+    // 先选玩家目标，再投骰
+    return {
+      game: {
+        ...game,
+        players,
+        actionPoints: game.actionPoints - 1,
+        pendingEffectTargetSelection: {
+          sourcePlayerIndex: playerIndex,
+          effectId: slot.hero.effectId,
+          heroName: slot.hero.name,
+          rollRequirement: slot.hero.rollRequirement ?? 6,
+        },
+      },
+      diceRoll: null,
+    }
+  }
+
+  const baseRoll = rollForHeroEffect(slot.hero.rollRequirement ?? 6, playerIndex)
+  const pendingRoll = attachHeroEffectMeta(baseRoll, slot.hero, playerIndex)
 
   return {
     game: {
       ...game,
       players,
       actionPoints: game.actionPoints - 1,
-      pendingRoll: distributed.pendingRoll,
-      pendingEffectTargetSelection: distributed.pendingEffectTargetSelection,
+      pendingRoll,
     },
     diceRoll: pendingRoll,
   }
@@ -736,34 +846,9 @@ function finalizeHeroRoll(game) {
   const requirement = pending.requirement ?? 6
   const success = pending.currentSum >= requirement
 
-  if (!pending.effectId) {
+  if (!pending.effectId || !success) {
     return {
-      game: { ...game, pendingRoll: null },
-      diceRoll: null,
-    }
-  }
-
-  if (!success) {
-    return {
-      game: { ...game, pendingRoll: null },
-      diceRoll: null,
-    }
-  }
-
-  if (pending.effectTargeted && pending.effectPhase === 'pre-target') {
-    /** @type {import('./gameState.js').PendingEffectTargetSelection} */
-    const sel = {
-      sourcePlayerIndex: pending.effectSourcePlayerIndex ?? 0,
-      effectId: pending.effectId,
-      heroName: pending.heroName ?? 'Hero',
-      resumeRoll: pending,
-    }
-    return {
-      game: {
-        ...game,
-        pendingRoll: null,
-        pendingEffectTargetSelection: sel,
-      },
+      game: { ...game, pendingRoll: null, pendingDestroyTargets: [] },
       diceRoll: null,
     }
   }
@@ -772,10 +857,12 @@ function finalizeHeroRoll(game) {
     sourcePlayerIndex: pending.effectSourcePlayerIndex,
     targetPlayerIndex: pending.effectTargetPlayerIndex,
     sourceLabel: pending.heroName,
+    count: pending.qiBearCount,
+    heroTargets: game.pendingDestroyTargets,
   })
 
   return {
-    game: { ...afterEffect, pendingRoll: null },
+    game: { ...afterEffect, pendingRoll: null, pendingDestroyTargets: [] },
     diceRoll: null,
     effectError: error,
   }
@@ -825,7 +912,7 @@ export function passModifierPhaseWithResult(game) {
 
 /**
  * Player who initiated a targeted hero effect picks which player receives it.
- * Re-opens the modifier window with `effectPhase: 'post-target'`.
+ * Rolls the dice and opens the modifier window once the target is confirmed.
  *
  * @param {GameState} game
  * @param {number} targetPlayerIndex
@@ -843,21 +930,238 @@ export function selectEffectTarget(game, targetPlayerIndex) {
   }
 
   const targetName = game.players[targetPlayerIndex].name
+
+  // 目标已确认，现在才投骰并开 modifier 窗口
+  const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
   /** @type {PendingRoll} */
-  const resumed = {
-    ...sel.resumeRoll,
-    effectPhase: 'post-target',
-    effectTargetPlayerIndex: targetPlayerIndex,
+  const pendingRoll = {
+    ...baseRoll,
+    heroName: sel.heroName,
     targetLabel: `${sel.heroName} → ${targetName}`,
+    effectId: sel.effectId,
+    effectSourcePlayerIndex: sel.sourcePlayerIndex,
+    effectTargetPlayerIndex: targetPlayerIndex,
   }
 
   return {
     game: {
       ...game,
       pendingEffectTargetSelection: null,
-      pendingRoll: resumed,
+      pendingRoll,
     },
-    pendingRoll: resumed,
+    pendingRoll,
+  }
+}
+
+/**
+ * Source player picks a card from the target's face-down hand (Fury Knuckle / Bear Claw).
+ * If the pulled card matches `bonusTriggerType`, a second pick is opened immediately.
+ *
+ * @param {GameState} game
+ * @param {string} instanceId - instanceId of the chosen card
+ */
+export function resolveCardPull(game, instanceId) {
+  const pending = game.pendingCardPull
+  if (!pending) {
+    return { game, error: 'No card pull pending.' }
+  }
+
+  const target = game.players[pending.targetPlayerIndex]
+  if (!target) {
+    return { game, error: 'Invalid target.' }
+  }
+
+  const card = target.hand.find((c) => c.instanceId === instanceId)
+  if (!card) {
+    return { game, error: 'Card not found in target hand.' }
+  }
+
+  // Execute the pull — move the card to source's hand
+  const { game: afterPull, error } = pullEffect(game, {
+    sourcePlayerIndex: pending.sourcePlayerIndex,
+    targetPlayerIndex: pending.targetPlayerIndex,
+    instanceId,
+  })
+  if (error) {
+    return { game, error }
+  }
+
+  // Check for bonus pull (only once — bonusTriggerType is null on the bonus pick)
+  const bonusTriggered =
+    pending.bonusTriggerType !== null &&
+    card.type === pending.bonusTriggerType &&
+    afterPull.players[pending.targetPlayerIndex].hand.length > 0
+
+  /** @type {import('./gameState.js').PendingCardPull | null} */
+  const nextCardPull = bonusTriggered
+    ? {
+        sourcePlayerIndex: pending.sourcePlayerIndex,
+        targetPlayerIndex: pending.targetPlayerIndex,
+        bonusTriggerType: null,
+        sourceLabel: pending.sourceLabel,
+        isBonusPull: true,
+      }
+    : null
+
+  return {
+    game: { ...afterPull, pendingCardPull: nextCardPull },
+    card,
+  }
+}
+
+/**
+ * Player who initiated a hero-targeted effect picks which specific hero to target.
+ * Adds the hero to `pendingDestroyTargets` (red highlight), rolls dice, and opens
+ * the modifier window — analogous to `selectEffectTarget` but at the hero level.
+ *
+ * @param {GameState} game
+ * @param {string} heroInstanceId
+ */
+export function selectEffectHeroTarget(game, heroInstanceId) {
+  const sel = game.pendingEffectHeroTargetSelection
+  if (!sel) {
+    return { game, error: 'No hero target selection pending.' }
+  }
+
+  // Find the owner of the hero
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1) {
+    return { game, error: 'Hero not found.' }
+  }
+
+  // Validate scope
+  if (sel.scope === 'own' && ownerIndex !== sel.sourcePlayerIndex) {
+    return { game, error: 'You must pick your own hero.' }
+  }
+  if (sel.scope === 'opponents' && ownerIndex === sel.sourcePlayerIndex) {
+    return { game, error: "You must pick an opponent's hero." }
+  }
+
+  const heroSlot = game.players[ownerIndex].partySlots.find(
+    (s) => s?.hero.instanceId === heroInstanceId,
+  )
+  const targetHeroName = heroSlot?.hero.name ?? 'Hero'
+
+  // Target confirmed — roll dice and open modifier window
+  const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
+  /** @type {PendingRoll} */
+  const pendingRoll = {
+    ...baseRoll,
+    heroName: sel.heroName,
+    targetLabel: `${sel.heroName} → ${targetHeroName}`,
+    effectId: sel.effectId,
+    effectSourcePlayerIndex: sel.sourcePlayerIndex,
+  }
+
+  return {
+    game: {
+      ...game,
+      pendingEffectHeroTargetSelection: null,
+      pendingDestroyTargets: [heroInstanceId],
+      pendingRoll,
+    },
+    pendingRoll,
+  }
+}
+
+/**
+ * Set the discard/destroy count for an open Qi Bear selection (0..maxCount).
+ * Shrinks heroTargets if the new count is lower.
+ *
+ * @param {GameState} game
+ * @param {number} sourcePlayerIndex
+ * @param {number} count
+ */
+export function setQiBearCount(game, sourcePlayerIndex, count) {
+  const sel = game.pendingQiBearSelection
+  if (!sel) return { game, error: 'No Qi Bear selection pending.' }
+  if (sel.sourcePlayerIndex !== sourcePlayerIndex) return { game, error: 'Not your selection.' }
+  if (count < 0 || count > sel.maxCount) return { game, error: 'Invalid count.' }
+  return {
+    game: {
+      ...game,
+      pendingQiBearSelection: {
+        ...sel,
+        count,
+        heroTargets: sel.heroTargets.slice(0, count),
+      },
+    },
+  }
+}
+
+/**
+ * Toggle a hero as a Qi Bear destroy target.
+ * Clicking a hero that is already selected deselects it.
+ * Clicking a new hero is only allowed when heroTargets.length < count.
+ *
+ * @param {GameState} game
+ * @param {number} sourcePlayerIndex
+ * @param {string} heroInstanceId
+ */
+export function toggleQiBearHeroTarget(game, sourcePlayerIndex, heroInstanceId) {
+  const sel = game.pendingQiBearSelection
+  if (!sel) return { game, error: 'No Qi Bear selection pending.' }
+  if (sel.sourcePlayerIndex !== sourcePlayerIndex) return { game, error: 'Not your selection.' }
+
+  const alreadySelected = sel.heroTargets.includes(heroInstanceId)
+  let heroTargets
+  if (alreadySelected) {
+    heroTargets = sel.heroTargets.filter((id) => id !== heroInstanceId)
+  } else {
+    if (sel.heroTargets.length >= sel.count) {
+      return { game, error: 'Deselect a hero first, or increase the count.' }
+    }
+    heroTargets = [...sel.heroTargets, heroInstanceId]
+  }
+  return {
+    game: {
+      ...game,
+      pendingQiBearSelection: { ...sel, heroTargets },
+    },
+  }
+}
+
+/**
+ * Confirm the Qi Bear pre-roll selection: roll the dice and open the modifier window.
+ *
+ * @param {GameState} game
+ * @param {number} sourcePlayerIndex
+ */
+export function confirmQiBearSelection(game, sourcePlayerIndex) {
+  const sel = game.pendingQiBearSelection
+  if (!sel) return { game, error: 'No Qi Bear selection pending.' }
+  if (sel.sourcePlayerIndex !== sourcePlayerIndex) return { game, error: 'Not your selection.' }
+  if (sel.heroTargets.length !== sel.count) {
+    return {
+      game,
+      error: `Select exactly ${sel.count} hero${sel.count !== 1 ? 'es' : ''} to destroy.`,
+    }
+  }
+
+  const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
+  /** @type {PendingRoll} */
+  const pendingRoll = {
+    ...baseRoll,
+    heroName: sel.heroName,
+    targetLabel:
+      sel.count > 0
+        ? `${sel.heroName}: discard ${sel.count}, destroy ${sel.count}`
+        : `${sel.heroName} skill`,
+    effectId: sel.effectId,
+    effectSourcePlayerIndex: sel.sourcePlayerIndex,
+    qiBearCount: sel.count,
+  }
+
+  return {
+    game: {
+      ...game,
+      pendingQiBearSelection: null,
+      pendingRoll,
+      pendingDestroyTargets: sel.heroTargets,
+    },
+    pendingRoll,
   }
 }
 
@@ -882,6 +1186,9 @@ export function selectHeroForPendingAction(game, partyOwnerIndex, heroInstanceId
     }
     if (sel.scope === 'opponents') {
       return { game, error: "You must pick an opponent's hero." }
+    }
+    if (sel.scope === 'specific') {
+      return { game, error: 'You must pick a hero from the targeted player.' }
     }
     return { game, error: 'Invalid party.' }
   }
@@ -940,10 +1247,106 @@ export function selectHeroForPendingAction(game, partyOwnerIndex, heroInstanceId
  * @param {GameState} game
  * @param {number} playerIndex
  */
+/**
+ * After all opponents have staged a discard for Beary Wise, either auto-take the
+ * sole card or open the pick prompt for the source player.
+ *
+ * @param {GameState} game
+ * @param {number} sourcePlayerIndex
+ * @param {string} sourceLabel
+ * @param {CardInstance[]} stagedCards
+ */
+function resolveBearyWiseStagedCards(
+  game,
+  sourcePlayerIndex,
+  sourceLabel,
+  stagedCards,
+) {
+  if (stagedCards.length === 0) {
+    return {
+      ...game,
+      pendingDiscard: null,
+      pendingStagedCardPick: null,
+    }
+  }
+
+  if (stagedCards.length === 1) {
+    const players = game.players.map((p, index) =>
+      index === sourcePlayerIndex
+        ? { ...p, hand: [...p.hand, stagedCards[0]] }
+        : p,
+    )
+    return {
+      ...game,
+      players,
+      pendingDiscard: null,
+      pendingStagedCardPick: null,
+    }
+  }
+
+  return {
+    ...game,
+    pendingDiscard: null,
+    pendingStagedCardPick: {
+      sourcePlayerIndex,
+      sourceLabel,
+      stagedCards,
+    },
+  }
+}
+
+/**
+ * Beary Wise: source player takes one staged card; the rest go to the discard pile.
+ *
+ * @param {GameState} game
+ * @param {number} playerIndex
+ * @param {string} instanceId
+ */
+export function pickStagedCard(game, playerIndex, instanceId) {
+  const pick = game.pendingStagedCardPick
+  if (!pick) {
+    return { game, error: 'No staged card pick pending.' }
+  }
+  if (playerIndex !== pick.sourcePlayerIndex) {
+    return { game, error: 'Only the player who triggered the effect may choose.' }
+  }
+  if (game.currentPlayerIndex !== pick.sourcePlayerIndex) {
+    return { game, error: 'Only the current player may choose.' }
+  }
+
+  const chosen = pick.stagedCards.find((c) => c.instanceId === instanceId)
+  if (!chosen) {
+    return { game, error: 'That card is not in the staged pool.' }
+  }
+
+  const remainder = pick.stagedCards.filter((c) => c.instanceId !== instanceId)
+  const discardPile = [
+    ...game.discardPile,
+    ...remainder.map((c) => withFaceUp(c)),
+  ]
+  const players = game.players.map((p, index) =>
+    index === pick.sourcePlayerIndex
+      ? { ...p, hand: [...p.hand, withFaceUp(chosen)] }
+      : p,
+  )
+
+  return {
+    game: {
+      ...game,
+      players,
+      discardPile,
+      pendingStagedCardPick: null,
+    },
+  }
+}
+
 export function passPendingDiscard(game, playerIndex) {
   const pending = game.pendingDiscard
   if (!pending) {
     return { game, error: 'No discard in progress.' }
+  }
+  if (pending.kind === 'opponentEach' || pending.kind === 'opponentEachPile') {
+    return { game, error: 'This discard cannot be skipped.' }
   }
   if (!pending.optional) {
     return { game, error: 'This discard cannot be skipped.' }
@@ -970,6 +1373,87 @@ export function discardForPendingDiscard(game, playerIndex, instanceId) {
   if (pending.playerIndex !== playerIndex) {
     return { game, error: 'This is not your discard.' }
   }
+
+  if (pending.kind === 'opponentEach' || pending.kind === 'opponentEachPile') {
+    const queue = pending.opponentDiscardQueue ?? []
+    const nextPending = (afterState) => {
+      if (queue.length === 0) {
+        if (pending.kind === 'opponentEach') {
+          return resolveBearyWiseStagedCards(
+            afterState,
+            pending.sourcePlayerIndex,
+            pending.sourceLabel,
+            pending.stagedCards ?? [],
+          )
+        }
+        return { ...afterState, pendingDiscard: null }
+      }
+      const [nextPlayer, ...rest] = queue
+      return {
+        ...afterState,
+        pendingDiscard: {
+          kind: pending.kind,
+          playerIndex: nextPlayer,
+          sourcePlayerIndex: pending.sourcePlayerIndex,
+          count: 1,
+          sourceLabel: pending.sourceLabel,
+          opponentDiscardQueue: rest,
+          ...(pending.kind === 'opponentEach'
+            ? { stagedCards: pending.stagedCards ?? [] }
+            : {}),
+        },
+      }
+    }
+
+    if (pending.kind === 'opponentEach') {
+      const { game: afterRemove, card, error } = removeCardFromHand(game, {
+        playerIndex,
+        instanceId,
+      })
+      if (error || !card) {
+        return { game: afterRemove, error: error ?? 'Could not remove card.' }
+      }
+
+      const stagedCards = [...(pending.stagedCards ?? []), card]
+      if (queue.length > 0) {
+        const [nextPlayer, ...rest] = queue
+        return {
+          game: {
+            ...afterRemove,
+            pendingDiscard: {
+              kind: 'opponentEach',
+              playerIndex: nextPlayer,
+              sourcePlayerIndex: pending.sourcePlayerIndex,
+              count: 1,
+              sourceLabel: pending.sourceLabel,
+              opponentDiscardQueue: rest,
+              stagedCards,
+            },
+          },
+        }
+      }
+
+      return {
+        game: resolveBearyWiseStagedCards(
+          afterRemove,
+          pending.sourcePlayerIndex,
+          pending.sourceLabel,
+          stagedCards,
+        ),
+      }
+    }
+
+    const { game: afterDiscard, error } = discardEffect(game, {
+      playerIndex,
+      instanceId,
+    })
+    if (error) {
+      return { game, error }
+    }
+
+    return { game: nextPending(afterDiscard) }
+  }
+
   const { game: afterDiscard, error } = discardEffect(game, {
     playerIndex,
     instanceId,
@@ -1109,7 +1593,12 @@ export function endTurn(game) {
     pendingRoll: null,
     pendingChallenge: null,
     pendingEffectTargetSelection: null,
+    pendingEffectHeroTargetSelection: null,
+    pendingCardPull: null,
     pendingDiscard: null,
+    pendingStagedCardPick: null,
     pendingHeroSelection: null,
+    pendingQiBearSelection: null,
+    pendingDestroyTargets: [],
   }
 }

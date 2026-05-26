@@ -148,6 +148,17 @@
   color: var(--text-h);
 }
 
+.hand-heading {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
 .deck-zones {
   display: flex;
   flex-direction: row;
