@@ -15,6 +15,7 @@ import { runCardEffect } from './cardEffects.js'
 import {
   destroy as destroyEffect,
   discard as discardEffect,
+  give as giveEffect,
   pull as pullEffect,
   removeCardFromHand,
   sacrifice as sacrificeEffect,
@@ -77,6 +78,13 @@ export function isPendingDiscardActive(game) {
 /**
  * @param {GameState} game
  */
+export function isPendingGiveActive(game) {
+  return game.pendingGive !== null
+}
+
+/**
+ * @param {GameState} game
+ */
 export function isPendingStagedCardPickActive(game) {
   return game.pendingStagedCardPick !== null
 }
@@ -126,6 +134,20 @@ export function isPendingQiBearSelectionActive(game) {
 /**
  * @param {GameState} game
  */
+export function isPendingHeroPlayChoiceActive(game) {
+  return game.pendingHeroPlayChoice !== null
+}
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingHeroFromHandPlayActive(game) {
+  return game.pendingHeroFromHandPlay !== null
+}
+
+/**
+ * @param {GameState} game
+ */
 export function isInterruptPhaseActive(game) {
   return (
     isChallengeWindowActive(game) ||
@@ -134,9 +156,12 @@ export function isInterruptPhaseActive(game) {
     isEffectHeroTargetSelectionActive(game) ||
     isPendingCardPullActive(game) ||
     isPendingDiscardActive(game) ||
+    isPendingGiveActive(game) ||
     isPendingStagedCardPickActive(game) ||
     isPendingHeroSelectionActive(game) ||
-    isPendingQiBearSelectionActive(game)
+    isPendingQiBearSelectionActive(game) ||
+    isPendingHeroPlayChoiceActive(game) ||
+    isPendingHeroFromHandPlayActive(game)
   )
 }
 
@@ -187,12 +212,29 @@ export function isPlayableFromHand(card, game, playerIndex) {
     )
   }
 
+  if (isPendingGiveActive(game)) {
+    const giverIndex = game.pendingGive.giverQueue[0]
+    return (
+      giverIndex === playerIndex &&
+      game.players[playerIndex].hand.some((c) => c.instanceId === card.instanceId)
+    )
+  }
+
   if (isPendingStagedCardPickActive(game)) {
     return false
   }
 
   if (isPendingHeroSelectionActive(game)) {
     return false
+  }
+
+  if (isPendingHeroFromHandPlayActive(game)) {
+    const pending = game.pendingHeroFromHandPlay
+    return (
+      pending.sourcePlayerIndex === playerIndex &&
+      card.type === CARD_TYPES.HERO &&
+      game.players[playerIndex].hand.some((c) => c.instanceId === card.instanceId)
+    )
   }
 
   if (isEffectTargetSelectionActive(game)) {
@@ -266,6 +308,7 @@ function attachHeroEffectMeta(pendingRoll, heroCard, sourcePlayerIndex) {
       ? {
           effectId: heroCard.effectId,
           effectSourcePlayerIndex: sourcePlayerIndex,
+          sourceHeroInstanceId: heroCard.instanceId,
         }
       : {}),
   }
@@ -320,7 +363,8 @@ function resolveStagedPlay(game, staged) {
         effectId: played.effectId,
         heroName: played.name,
         rollRequirement: played.rollRequirement ?? 6,
-        scope: 'any',
+        scope: played.heroTargetScope ?? 'any',
+        sourceHeroInstanceId: played.instanceId,
       }
     } else if (played.targeted && played.effectId) {
       // 先选玩家目标，再投骰
@@ -671,7 +715,8 @@ export function triggerHeroSkill(game, heroInstanceId) {
           effectId: slot.hero.effectId,
           heroName: slot.hero.name,
           rollRequirement: slot.hero.rollRequirement ?? 6,
-          scope: 'any',
+          scope: slot.hero.heroTargetScope ?? 'any',
+          sourceHeroInstanceId: slot.hero.instanceId,
         },
       },
       diceRoll: null,
@@ -859,6 +904,7 @@ function finalizeHeroRoll(game) {
     sourceLabel: pending.heroName,
     count: pending.qiBearCount,
     heroTargets: game.pendingDestroyTargets,
+    sourceHeroInstanceId: pending.sourceHeroInstanceId,
   })
 
   return {
@@ -999,12 +1045,30 @@ export function resolveCardPull(game, instanceId) {
         targetPlayerIndex: pending.targetPlayerIndex,
         bonusTriggerType: null,
         sourceLabel: pending.sourceLabel,
+        allowImmediateHeroPlay: pending.allowImmediateHeroPlay,
         isBonusPull: true,
       }
     : null
 
+  // Lucky Bucky-style follow-up: if the pulled card is Hero, allow immediate play.
+  const openHeroPlayChoice =
+    pending.allowImmediateHeroPlay === true &&
+    card.type === CARD_TYPES.HERO
+
   return {
-    game: { ...afterPull, pendingCardPull: nextCardPull },
+    game: {
+      ...afterPull,
+      pendingCardPull: nextCardPull,
+      ...(openHeroPlayChoice
+        ? {
+            pendingHeroPlayChoice: {
+              sourcePlayerIndex: pending.sourcePlayerIndex,
+              heroCard: withFaceUp(card),
+              sourceLabel: pending.sourceLabel,
+            },
+          }
+        : {}),
+    },
     card,
   }
 }
@@ -1053,6 +1117,7 @@ export function selectEffectHeroTarget(game, heroInstanceId) {
     targetLabel: `${sel.heroName} → ${targetHeroName}`,
     effectId: sel.effectId,
     effectSourcePlayerIndex: sel.sourcePlayerIndex,
+    sourceHeroInstanceId: sel.sourceHeroInstanceId,
   }
 
   return {
@@ -1505,6 +1570,51 @@ export function discardForPendingDiscard(game, playerIndex, instanceId) {
 }
 
 /**
+ * Greedy Cheeks: current giver selects one card from their hand to give to the target.
+ * Resolves the first index in `pendingGive.giverQueue`, then advances the queue.
+ *
+ * @param {GameState} game
+ * @param {number} giverPlayerIndex
+ * @param {string} instanceId
+ */
+export function giveForPendingGive(game, giverPlayerIndex, instanceId) {
+  const pending = game.pendingGive
+  if (!pending) {
+    return { game, error: 'No give required.' }
+  }
+
+  const expectedGiver = pending.giverQueue[0]
+  if (expectedGiver !== giverPlayerIndex) {
+    return { game, error: 'This player is not currently giving.' }
+  }
+
+  const { game: afterGive, error } = giveEffect(game, {
+    sourcePlayerIndex: giverPlayerIndex,
+    targetPlayerIndex: pending.targetPlayerIndex,
+    instanceId,
+  })
+  if (error) {
+    return { game, error }
+  }
+
+  // advance to next giver; skip players who now have empty hands
+  let queue = pending.giverQueue.slice(1)
+  while (queue.length > 0 && afterGive.players[queue[0]]?.hand.length === 0) {
+    queue = queue.slice(1)
+  }
+
+  return {
+    game: {
+      ...afterGive,
+      pendingGive:
+        queue.length > 0
+          ? { ...pending, giverQueue: queue }
+          : null,
+    },
+  }
+}
+
+/**
  * @param {GameState} game
  */
 export function restockHand(game) {
@@ -1582,7 +1692,9 @@ export function endTurn(game) {
   const players = game.players.map((p, index) => ({
     ...p,
     partySlots:
-      index === nextIndex ? resetPartySkillUsage(p.partySlots) : p.partySlots,
+      index === game.currentPlayerIndex
+        ? resetPartySkillUsage(p.partySlots)
+        : p.partySlots,
   }))
 
   return {
@@ -1596,9 +1708,135 @@ export function endTurn(game) {
     pendingEffectHeroTargetSelection: null,
     pendingCardPull: null,
     pendingDiscard: null,
+    pendingGive: null,
     pendingStagedCardPick: null,
     pendingHeroSelection: null,
     pendingQiBearSelection: null,
+    pendingHeroPlayChoice: null,
+    pendingHeroFromHandPlay: null,
     pendingDestroyTargets: [],
   }
+}
+
+/**
+ * Fuzzy Cheeks: source player selected a Hero card from their hand to play immediately.
+ * This does NOT cost AP and does NOT open a challenge window.
+ *
+ * @param {GameState} game
+ * @param {number} playerIndex
+ * @param {string} instanceId
+ */
+export function playHeroFromHandForPending(game, playerIndex, instanceId) {
+  const pending = game.pendingHeroFromHandPlay
+  if (!pending) {
+    return { game, diceRoll: null, error: 'No hero-from-hand play pending.' }
+  }
+  if (pending.sourcePlayerIndex !== playerIndex) {
+    return { game, diceRoll: null, error: 'Only the source player may choose.' }
+  }
+
+  const player = game.players[playerIndex]
+  if (!player) {
+    return { game, diceRoll: null, error: 'Invalid player.' }
+  }
+
+  const handIndex = player.hand.findIndex((c) => c.instanceId === instanceId)
+  if (handIndex === -1) {
+    return { game, diceRoll: null, error: 'Card not in hand.' }
+  }
+  const card = player.hand[handIndex]
+  if (card.type !== CARD_TYPES.HERO) {
+    return { game, diceRoll: null, error: 'You must choose a Hero card.' }
+  }
+
+  const emptyIndex = findFirstEmptyPartyIndex(player.partySlots)
+  if (emptyIndex === -1) {
+    return { game, diceRoll: null, error: 'No empty party slot.' }
+  }
+
+  const hand = player.hand.filter((_, idx) => idx !== handIndex)
+  const players = game.players.map((p, idx) =>
+    idx === playerIndex ? { ...p, hand } : p,
+  )
+
+  const cleared = {
+    ...game,
+    players,
+    pendingHeroFromHandPlay: null,
+  }
+
+  /** @type {StagedPlay} */
+  const staged = {
+    card: withFaceUp(card),
+    attackerIndex: playerIndex,
+    cardType: CARD_TYPES.HERO,
+  }
+
+  return resolveStagedPlay(cleared, staged)
+}
+
+/**
+ * Mellow Dee: source player chose to play the drawn hero immediately.
+ * Pulls it from hand, places it in their first empty party slot, and starts
+ * that hero's normal effect chain (roll/target/qi bear selection/etc).
+ * Does NOT cost AP and does NOT open a challenge window — it's a bonus play.
+ *
+ * @param {GameState} game
+ */
+export function confirmHeroPlayChoice(game) {
+  const pending = game.pendingHeroPlayChoice
+  if (!pending) {
+    return { game, diceRoll: null, error: 'No hero play choice pending.' }
+  }
+
+  const player = game.players[pending.sourcePlayerIndex]
+  if (!player) {
+    return { game, diceRoll: null, error: 'Invalid player.' }
+  }
+
+  const handIndex = player.hand.findIndex(
+    (c) => c.instanceId === pending.heroCard.instanceId,
+  )
+  if (handIndex === -1) {
+    return { game, diceRoll: null, error: 'Drawn hero is no longer in hand.' }
+  }
+
+  const emptyIndex = findFirstEmptyPartyIndex(player.partySlots)
+  if (emptyIndex === -1) {
+    return { game, diceRoll: null, error: 'No empty party slot.' }
+  }
+
+  const card = player.hand[handIndex]
+  const hand = player.hand.filter((_, idx) => idx !== handIndex)
+  const players = game.players.map((p, idx) =>
+    idx === pending.sourcePlayerIndex ? { ...p, hand } : p,
+  )
+
+  const cleared = {
+    ...game,
+    players,
+    pendingHeroPlayChoice: null,
+  }
+
+  /** @type {StagedPlay} */
+  const staged = {
+    card: withFaceUp(card),
+    attackerIndex: pending.sourcePlayerIndex,
+    cardType: CARD_TYPES.HERO,
+  }
+
+  return resolveStagedPlay(cleared, staged)
+}
+
+/**
+ * Mellow Dee: source player declined to play the drawn hero immediately.
+ * The card stays in their hand and the prompt closes.
+ *
+ * @param {GameState} game
+ */
+export function declineHeroPlayChoice(game) {
+  if (!game.pendingHeroPlayChoice) {
+    return { game, error: 'No hero play choice pending.' }
+  }
+  return { game: { ...game, pendingHeroPlayChoice: null } }
 }

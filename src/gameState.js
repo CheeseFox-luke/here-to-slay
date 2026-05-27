@@ -128,6 +128,8 @@ export function partyHasHero(partySlots) {
  * @property {number} [effectTargetPlayerIndex]
  * @property {string} [heroName]
  * @property {number} [qiBearCount]
+ * @property {string} [sourceHeroInstanceId] - instanceId of the hero whose skill
+ *   triggered this roll (e.g. Tipsy Tootie itself, needed for swap).
  */
 
 /**
@@ -150,6 +152,16 @@ export function partyHasHero(partySlots) {
  */
 
 /**
+ * Greedy Cheeks: each other player gives you 1 card of their choice.
+ * Resolved one player at a time by clicking a card in that player's hand.
+ *
+ * @typedef {Object} PendingGive
+ * @property {number} targetPlayerIndex - who receives the cards
+ * @property {number[]} giverQueue - remaining players who must give a card
+ * @property {string} sourceLabel - label shown in the UI (e.g. "Greedy Cheeks")
+ */
+
+/**
  * Fury Knuckle / Bear Claw: source player picks a specific card from the
  * target's face-down hand. If the pulled card matches `bonusTriggerType`,
  * another pick opens (with `bonusTriggerType: null` — no further bonus).
@@ -159,6 +171,8 @@ export function partyHasHero(partySlots) {
  * @property {number} targetPlayerIndex
  * @property {import('./data/cardUtils.js').CardType | null} bonusTriggerType
  * @property {string} sourceLabel
+ * @property {boolean} [allowImmediateHeroPlay] - if true and the pulled card is
+ *   a Hero, source player may play it immediately (using pendingHeroPlayChoice)
  * @property {boolean} [isBonusPull]
  */
 
@@ -169,6 +183,27 @@ export function partyHasHero(partySlots) {
  * @property {number} sourcePlayerIndex
  * @property {string} sourceLabel
  * @property {CardInstance[]} stagedCards
+ */
+
+/**
+ * Mellow Dee: player drew a Hero card and may choose to play it immediately.
+ * If accepted, the hero is added to their party and its skill triggers.
+ * If declined, the card stays in hand.
+ *
+ * @typedef {Object} PendingHeroPlayChoice
+ * @property {number} sourcePlayerIndex
+ * @property {CardInstance} heroCard - the drawn Hero card (already in hand)
+ * @property {string} sourceLabel
+ */
+
+/**
+ * Fuzzy Cheeks: after drawing 1, source player must play a Hero card from their hand
+ * (if possible). The hero is played immediately without AP cost and without opening
+ * a challenge window, and its ability flow begins.
+ *
+ * @typedef {Object} PendingHeroFromHandPlay
+ * @property {number} sourcePlayerIndex
+ * @property {string} sourceLabel
  */
 
 /**
@@ -189,6 +224,8 @@ export function partyHasHero(partySlots) {
  * @property {string} heroName
  * @property {number} rollRequirement
  * @property {'own' | 'opponents' | 'any'} scope - which parties contain valid heroes
+ * @property {string} [sourceHeroInstanceId] - instanceId of the hero whose skill
+ *   triggered this selection (e.g. Tipsy Tootie itself, needed for swap).
  */
 
 /**
@@ -253,9 +290,12 @@ export function partyHasHero(partySlots) {
  * @property {PendingEffectHeroTargetSelection | null} pendingEffectHeroTargetSelection
  * @property {PendingCardPull | null} pendingCardPull
  * @property {PendingDiscard | null} pendingDiscard
+ * @property {PendingGive | null} pendingGive
  * @property {PendingStagedCardPick | null} pendingStagedCardPick
  * @property {PendingHeroSelection | null} pendingHeroSelection
  * @property {PendingQiBearSelection | null} pendingQiBearSelection
+ * @property {PendingHeroPlayChoice | null} pendingHeroPlayChoice
+ * @property {PendingHeroFromHandPlay | null} pendingHeroFromHandPlay
  * @property {string[]} pendingDestroyTargets - instanceIds of heroes currently marked for
  *   destruction by an in-progress effect; cleared when the effect resolves or the turn ends
  */
@@ -305,9 +345,12 @@ export const initialGameState = {
   pendingEffectHeroTargetSelection: null,
   pendingCardPull: null,
   pendingDiscard: null,
+  pendingGive: null,
   pendingStagedCardPick: null,
   pendingHeroSelection: null,
   pendingQiBearSelection: null,
+  pendingHeroPlayChoice: null,
+  pendingHeroFromHandPlay: null,
   pendingDestroyTargets: [],
 }
 
@@ -369,9 +412,12 @@ export function initGame(playerCount) {
     pendingEffectHeroTargetSelection: null,
     pendingCardPull: null,
     pendingDiscard: null,
+    pendingGive: null,
     pendingStagedCardPick: null,
     pendingHeroSelection: null,
     pendingQiBearSelection: null,
+    pendingHeroPlayChoice: null,
+    pendingHeroFromHandPlay: null,
     pendingDestroyTargets: [],
   }
 }

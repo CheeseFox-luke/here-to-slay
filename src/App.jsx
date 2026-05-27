@@ -22,8 +22,11 @@ import {
   ATTACK_MONSTER_ACTION_NAME,
   RESTOCK_HAND_ACTION_NAME,
   attackMonster,
+  confirmHeroPlayChoice,
   confirmQiBearSelection,
+  declineHeroPlayChoice,
   discardForPendingDiscard,
+  giveForPendingGive,
   passPendingDiscard,
   drawCard,
   endTurn,
@@ -36,6 +39,9 @@ import {
   isPartyClickableForHeroTargetSelection,
   isPendingCardPullActive,
   isPendingDiscardActive,
+  isPendingGiveActive,
+  isPendingHeroFromHandPlayActive,
+  isPendingHeroPlayChoiceActive,
   isPendingStagedCardPickActive,
   isPendingHeroSelectionActive,
   isPendingQiBearSelectionActive,
@@ -45,6 +51,7 @@ import {
   passModifierPhaseWithResult,
   playCardFromHand,
   playChallengeCard,
+  playHeroFromHandForPending,
   playItemOnHero,
   playModifierOnPendingRoll,
   restockHand,
@@ -87,15 +94,29 @@ function App() {
   const challengePhase = isChallengeWindowActive(game)
   const targetSelectionPhase = isEffectTargetSelectionActive(game)
   const heroTargetSelectionPhase = isEffectHeroTargetSelectionActive(game)
+  const heroTargetAction =
+    heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection
+      ? game.pendingEffectHeroTargetSelection.effectId === 'tipsyTootie'
+        ? 'steal'
+        : 'destroy'
+      : 'destroy'
   const cardPullPhase = isPendingCardPullActive(game)
   const cardPull = game.pendingCardPull
   const pendingDiscardPhase = isPendingDiscardActive(game)
+  const pendingGivePhase = isPendingGiveActive(game)
+  const pendingGive = game.pendingGive
+  const currentGiverIndex = pendingGive?.giverQueue?.[0] ?? -1
+  const currentGiver = currentGiverIndex >= 0 ? game.players[currentGiverIndex] : null
+  const heroFromHandPlayPhase = isPendingHeroFromHandPlayActive(game)
+  const heroFromHandPlay = game.pendingHeroFromHandPlay
   const stagedCardPickPhase = isPendingStagedCardPickActive(game)
   const stagedCardPick = game.pendingStagedCardPick
   const heroSelectionPhase = isPendingHeroSelectionActive(game)
   const heroSelection = game.pendingHeroSelection
   const qiBearPhase = isPendingQiBearSelectionActive(game)
   const qiBearSel = game.pendingQiBearSelection
+  const heroPlayChoicePhase = isPendingHeroPlayChoiceActive(game)
+  const heroPlayChoice = game.pendingHeroPlayChoice
   const interruptPhase =
     modifierPhase ||
     challengePhase ||
@@ -103,9 +124,12 @@ function App() {
     heroTargetSelectionPhase ||
     cardPullPhase ||
     pendingDiscardPhase ||
+    pendingGivePhase ||
     stagedCardPickPhase ||
     heroSelectionPhase ||
-    qiBearPhase
+    qiBearPhase ||
+    heroPlayChoicePhase ||
+    heroFromHandPlayPhase
   const canPlay = game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId
   const canDraw =
     !interruptPhase &&
@@ -226,6 +250,46 @@ function App() {
   }, [game.pendingRoll, displayRoll])
 
   function handlePlayCard(card, playerIndex) {
+    if (heroFromHandPlayPhase && heroFromHandPlay) {
+      if (playerIndex !== heroFromHandPlay.sourcePlayerIndex) {
+        return
+      }
+      if (card.type !== CARD_TYPES.HERO) {
+        return
+      }
+      const { game: nextGame, diceRoll, error } = playHeroFromHandForPending(
+        game,
+        playerIndex,
+        card.instanceId,
+      )
+      if (error) {
+        window.alert(error)
+        return
+      }
+      setGame(nextGame)
+      if (diceRoll) {
+        setDisplayRoll(diceRoll)
+      }
+      return
+    }
+
+    if (pendingGivePhase && pendingGive) {
+      if (playerIndex !== currentGiverIndex) {
+        return
+      }
+      const { game: nextGame, error } = giveForPendingGive(
+        game,
+        playerIndex,
+        card.instanceId,
+      )
+      if (error) {
+        window.alert(error)
+        return
+      }
+      setGame(nextGame)
+      return
+    }
+
     if (pendingDiscardPhase) {
       if (playerIndex !== pendingDiscard.playerIndex) {
         return
@@ -473,6 +537,27 @@ function App() {
     setGame(nextGame)
   }
 
+  function handleConfirmHeroPlayChoice() {
+    const { game: nextGame, diceRoll, error } = confirmHeroPlayChoice(game)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+    if (diceRoll) {
+      setDisplayRoll(diceRoll)
+    }
+  }
+
+  function handleDeclineHeroPlayChoice() {
+    const { game: nextGame, error } = declineHeroPlayChoice(game)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+  }
+
   function handleDrawCard() {
     const { game: nextGame, error } = drawCard(game)
     if (error) {
@@ -686,6 +771,49 @@ function App() {
         </div>
       )}
 
+      {heroPlayChoicePhase && heroPlayChoice && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          <p className="challenge-phase-bar__text">
+            <strong>
+              {game.players[heroPlayChoice.sourcePlayerIndex]?.name}
+            </strong>
+            : <strong>{heroPlayChoice.sourceLabel}</strong> lets you play{' '}
+            <strong>{heroPlayChoice.heroCard.name}</strong> immediately
+            (and trigger its skill), or keep it in your hand?
+          </p>
+          <div className="card-row staged-card-row">
+            <div className="hand-card">
+              <CardDisplay
+                card={heroPlayChoice.heroCard}
+                faceUp={heroPlayChoice.heroCard.faceUp ?? true}
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              type="button"
+              className="game-actions__btn game-actions__btn--primary"
+              disabled={
+                game.currentPlayerIndex !== heroPlayChoice.sourcePlayerIndex
+              }
+              onClick={handleConfirmHeroPlayChoice}
+            >
+              Play immediately
+            </button>
+            <button
+              type="button"
+              className="game-actions__btn"
+              disabled={
+                game.currentPlayerIndex !== heroPlayChoice.sourcePlayerIndex
+              }
+              onClick={handleDeclineHeroPlayChoice}
+            >
+              Keep in hand
+            </button>
+          </div>
+        </div>
+      )}
+
       {qiBearPhase && qiBearSel && (
         <div className="modifier-phase-bar challenge-phase-bar">
           <p className="challenge-phase-bar__text">
@@ -721,7 +849,7 @@ function App() {
         <div className="modifier-phase-bar challenge-phase-bar">
           <p className="challenge-phase-bar__text">
             <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>
-            : Choose a hero to destroy — click a hero on any party below.
+            : Choose a hero to {heroTargetAction} — click a hero on any party below.
           </p>
         </div>
       )}
@@ -799,6 +927,26 @@ function App() {
         </div>
       )}
 
+      {pendingGivePhase && pendingGive && currentGiver && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          <p className="challenge-phase-bar__text">
+            <strong>{currentGiver.name}</strong>: give 1 card to{' '}
+            <strong>{game.players[pendingGive.targetPlayerIndex]?.name ?? 'Player'}</strong>{' '}
+            (from <strong>{pendingGive.sourceLabel}</strong>). Click a card in your hand.
+          </p>
+        </div>
+      )}
+
+      {heroFromHandPlayPhase && heroFromHandPlay && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          <p className="challenge-phase-bar__text">
+            <strong>{game.players[heroFromHandPlay.sourcePlayerIndex]?.name}</strong>:
+            choose a <strong>Hero</strong> card from your hand to play immediately
+            (from <strong>{heroFromHandPlay.sourceLabel}</strong>).
+          </p>
+        </div>
+      )}
+
       <SkillConfirmDialog
         heroName={skillDialog?.heroName ?? ''}
         open={skillDialog !== null}
@@ -865,7 +1013,7 @@ function App() {
               —{' '}
               {game.players[game.pendingEffectHeroTargetSelection.sourcePlayerIndex]
                 ?.name ?? 'Player'}
-              : pick a hero to destroy
+              : pick a hero to {heroTargetAction}
             </span>
           )}
           {pendingDiscardPhase && (
@@ -878,6 +1026,18 @@ function App() {
                 : pendingDiscard?.optional
                   ? ` may discard up to ${pendingDiscard.count} (or Pass)`
                   : ` must discard ${pendingDiscard?.count}`}
+            </span>
+          )}
+          {pendingGivePhase && pendingGive && currentGiver && (
+            <span className="game-header__warn">
+              {' '}
+              — {currentGiver.name} must give 1 card ({pendingGive.sourceLabel})
+            </span>
+          )}
+          {heroFromHandPlayPhase && heroFromHandPlay && (
+            <span className="game-header__warn">
+              {' '}
+              — {game.players[heroFromHandPlay.sourcePlayerIndex]?.name} must play a Hero from hand ({heroFromHandPlay.sourceLabel})
             </span>
           )}
           {stagedCardPickPhase && stagedCardPick && (
@@ -1023,7 +1183,7 @@ function App() {
               {partyClickableForSelection &&
                 ` — pick a hero to ${selectionMode}`}
               {partyClickableForHeroTarget &&
-                ` — pick a hero to destroy`}
+                ` — pick a hero to ${heroTargetAction}`}
             </h2>
 
             <PartyBoard
@@ -1065,6 +1225,14 @@ function App() {
                   : `Waiting for ${
                       game.players[heroSelection.sourcePlayerIndex]?.name
                     } to pick a hero.`
+                : heroFromHandPlayPhase && heroFromHandPlay
+                  ? playerIndex === heroFromHandPlay.sourcePlayerIndex
+                    ? 'Play a Hero card from your hand (click a Hero below).'
+                    : `Waiting for ${game.players[heroFromHandPlay.sourcePlayerIndex]?.name} to play a Hero from hand.`
+                : pendingGivePhase && pendingGive
+                  ? playerIndex === currentGiverIndex
+                    ? `Give 1 card to ${game.players[pendingGive.targetPlayerIndex]?.name ?? 'Player'} (click below).`
+                    : `Waiting for ${currentGiver?.name ?? 'player'} to give a card.`
                 : stagedCardPickPhase && stagedCardPick
                   ? playerIndex === stagedCardPick.sourcePlayerIndex
                     ? 'Choose 1 staged card above to add to your hand.'
@@ -1081,7 +1249,7 @@ function App() {
                       : 'Waiting for opponent to discard.'
                     : heroTargetSelectionPhase
                       ? playerIndex === game.pendingEffectHeroTargetSelection?.sourcePlayerIndex
-                        ? 'Pick a hero to destroy (click on the party above).'
+                        ? `Pick a hero to ${heroTargetAction} (click on the party above).`
                         : 'Waiting for opponent to pick a hero.'
                       : targetSelectionPhase
                         ? playerIndex === effectSel.sourcePlayerIndex
@@ -1107,6 +1275,10 @@ function App() {
                   const playable = isPlayableFromHand(card, game, playerIndex)
                   const enabled = pendingDiscardPhase
                     ? playable
+                    : pendingGivePhase
+                      ? playable
+                      : heroFromHandPlayPhase
+                        ? playable
                     : heroTargetSelectionPhase
                       ? false
                       : targetSelectionPhase

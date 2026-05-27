@@ -208,6 +208,74 @@ export function steal(game, { sourcePlayerIndex, targetPlayerIndex, heroInstance
 }
 
 /**
+ * Swap two heroes (with their items) between two different parties.
+ * heroA in player A's party trades slots with heroB in player B's party.
+ * Both heroes are marked `skillUsedThisTurn: true` after the swap so they
+ * can't immediately re-trigger their skills.
+ *
+ * @param {GameState} game
+ * @param {{
+ *   playerAIndex: number,
+ *   heroAInstanceId: string,
+ *   playerBIndex: number,
+ *   heroBInstanceId: string,
+ * }} params
+ */
+export function swapHero(game, {
+  playerAIndex,
+  heroAInstanceId,
+  playerBIndex,
+  heroBInstanceId,
+}) {
+  if (playerAIndex === playerBIndex) {
+    return { game, error: 'Cannot swap heroes within the same party.' }
+  }
+  const playerA = game.players[playerAIndex]
+  const playerB = game.players[playerBIndex]
+  if (!playerA || !playerB) {
+    return { game, error: 'Invalid players.' }
+  }
+
+  const slotAIndex = playerA.partySlots.findIndex(
+    (s) => s?.hero.instanceId === heroAInstanceId,
+  )
+  const slotBIndex = playerB.partySlots.findIndex(
+    (s) => s?.hero.instanceId === heroBInstanceId,
+  )
+  if (slotAIndex === -1) {
+    return { game, error: "Source hero not in player A's party." }
+  }
+  if (slotBIndex === -1) {
+    return { game, error: "Target hero not in player B's party." }
+  }
+
+  const slotA = playerA.partySlots[slotAIndex]
+  const slotB = playerB.partySlots[slotBIndex]
+
+  const aSlots = clonePartySlots(playerA.partySlots)
+  aSlots[slotAIndex] = {
+    hero: slotB.hero,
+    items: [...slotB.items],
+    skillUsedThisTurn: true,
+  }
+
+  const bSlots = clonePartySlots(playerB.partySlots)
+  bSlots[slotBIndex] = {
+    hero: slotA.hero,
+    items: [...slotA.items],
+    skillUsedThisTurn: true,
+  }
+
+  let next = updatePlayer(game, playerAIndex, { partySlots: aSlots })
+  next = updatePlayer(next, playerBIndex, { partySlots: bSlots })
+
+  return {
+    game: next,
+    swapped: { heroFromA: slotA.hero, heroFromB: slotB.hero },
+  }
+}
+
+/**
  * Take a specific card from another player's hand into your own hand.
  * @param {GameState} game
  * @param {{
@@ -273,6 +341,27 @@ export function give(game, { sourcePlayerIndex, targetPlayerIndex, instanceId })
   let next = updatePlayer(game, sourcePlayerIndex, { hand: sourceHand })
   next = updatePlayer(next, targetPlayerIndex, { hand: targetHand })
   return { game: next, card }
+}
+
+/**
+ * Swap two players' entire hands.
+ * @param {GameState} game
+ * @param {{ playerAIndex: number, playerBIndex: number }} params
+ */
+export function swapHands(game, { playerAIndex, playerBIndex }) {
+  if (playerAIndex === playerBIndex) {
+    return { game, error: 'Cannot swap hands with yourself.' }
+  }
+  const playerA = game.players[playerAIndex]
+  const playerB = game.players[playerBIndex]
+  if (!playerA || !playerB) {
+    return { game, error: 'Invalid players.' }
+  }
+  const handA = playerA.hand
+  const handB = playerB.hand
+  let next = updatePlayer(game, playerAIndex, { hand: handB })
+  next = updatePlayer(next, playerBIndex, { hand: handA })
+  return { game: next }
 }
 
 const SEARCHABLE_DISCARD_TYPES = new Set([

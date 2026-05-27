@@ -45,6 +45,8 @@ export const HERO_ROLL_REQUIREMENT = 6
  * @param {{
  *   rollRequirement?: number,
  *   targeted?: boolean,
+ *   heroTargeted?: boolean,
+ *   heroTargetScope?: 'own' | 'opponents' | 'any',
  *   effectId?: string,
  *   effect?: string,
  * }} [options]
@@ -55,6 +57,7 @@ function createHeroCard(id, filename, heroClass, options = {}) {
     rollRequirement: options.rollRequirement ?? HERO_ROLL_REQUIREMENT,
     targeted: options.targeted ?? false,
     heroTargeted: options.heroTargeted ?? false,
+    ...(options.heroTargetScope ? { heroTargetScope: options.heroTargetScope } : {}),
     ...(options.effectId ? { effectId: options.effectId } : {}),
     ...(options.effect ? { effect: options.effect } : {}),
   }
@@ -111,14 +114,51 @@ export const heroCardsByClass = {
     }),
   ],
   [HERO_CLASSES.BARD]: [
-    createHeroCard('035', 'HtS-Base-035-Hero-Bard.png', HERO_CLASSES.BARD),
-    createHeroCard('036', 'HtS-Base-036-Hero-Bard.png', HERO_CLASSES.BARD),
-    createHeroCard('037', 'HtS-Base-037-Hero-Bard.png', HERO_CLASSES.BARD),
-    createHeroCard('038', 'HtS-Base-038-Hero-Bard.png', HERO_CLASSES.BARD),
-    createHeroCard('039', 'HtS-Base-039-Hero-Bard.png', HERO_CLASSES.BARD),
-    createHeroCard('040', 'HtS-Base-040-Hero-Bard.png', HERO_CLASSES.BARD),
-    createHeroCard('041', 'HtS-Base-041-Hero-Bard.png', HERO_CLASSES.BARD),
-    createHeroCard('042', 'HtS-Base-042-Hero-Bard.png', HERO_CLASSES.BARD),
+    createHeroCard('Peanut', 'HtS-Base-035-Hero-Bard.png', HERO_CLASSES.BARD, {
+      rollRequirement: 7,
+      effectId: 'peanut',
+      effect: 'Draw 2 cards.',
+    }),
+    createHeroCard('Napping Nibbles', 'HtS-Base-036-Hero-Bard.png', HERO_CLASSES.BARD, {
+      rollRequirement: 2,
+      effect: '',
+    }),
+    createHeroCard('Mellow Dee', 'HtS-Base-037-Hero-Bard.png', HERO_CLASSES.BARD, {
+      rollRequirement: 7,
+      effectId: 'mellowDee',
+      effect: 'Draw 1 card. If it\'s a Hero, you may play it immediately and trigger its ability.',
+    }),
+    createHeroCard('Greedy Cheeks', 'HtS-Base-038-Hero-Bard.png', HERO_CLASSES.BARD, {
+      rollRequirement: 8,
+      effectId: 'greedyCheeks',
+      effect: 'Each other player must give you 1 card from their hand.',
+    }),
+    createHeroCard('Fuzzy Cheeks', 'HtS-Base-039-Hero-Bard.png', HERO_CLASSES.BARD, {
+      rollRequirement: 8,
+      effectId: 'fuzzyCheeks',
+      effect: "Draw 1 card and play a Hero card from your hand (and trigger that Hero's ability).",
+    }),
+    createHeroCard('Tipsy Tootie', 'HtS-Base-040-Hero-Bard.png', HERO_CLASSES.BARD, {
+      rollRequirement: 6,
+      heroTargeted: true,
+      heroTargetScope: 'opponents',
+      effectId: 'tipsyTootie',
+      effect:
+        "Choose a player. STEAL a Hero card from that player's Party and move Tipsy Tootie to that player's Party.",
+    }),
+    createHeroCard('Dodgy Dealer', 'HtS-Base-041-Hero-Bard.png', HERO_CLASSES.BARD, {
+      rollRequirement: 9,
+      targeted: true,
+      effectId: 'dodgyDealer',
+      effect: 'Trade hands with another player.',
+    }),
+    createHeroCard('Lucky Bucky', 'HtS-Base-042-Hero-Bard.png', HERO_CLASSES.BARD, {
+      rollRequirement: 7,
+      targeted: true,
+      effectId: 'luckyBucky',
+      effect:
+        "Pull a card from another player's hand. If it is a Hero card, you may play it immediately.",
+    }),
   ],
   [HERO_CLASSES.GUARDIAN]: [
     createHeroCard('043', 'HtS-Base-043-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
