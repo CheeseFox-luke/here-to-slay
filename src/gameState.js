@@ -69,6 +69,8 @@ export function partyHasHero(partySlots) {
  * @property {boolean} [heroTargeted]
  * @property {string} [effectId]
  * @property {string} [effect]
+ * @property {boolean} [antiSteal] - hero-level: this hero cannot be selected as a STEAL target.
+ * @property {boolean} [antiDestroy] - hero-level: this hero cannot be selected as a DESTROY target.
  */
 
 /**
@@ -298,6 +300,8 @@ export function partyHasHero(partySlots) {
  * @property {PendingHeroFromHandPlay | null} pendingHeroFromHandPlay
  * @property {string[]} pendingDestroyTargets - instanceIds of heroes currently marked for
  *   destruction by an in-progress effect; cleared when the effect resolves or the turn ends
+ * @property {boolean} [antiChallenge] - while true, no player may play a Challenge card.
+ * @property {boolean} [antiModifier] - while true, no player may play a Modifier card.
  */
 
 /**
@@ -352,6 +356,8 @@ export const initialGameState = {
   pendingHeroPlayChoice: null,
   pendingHeroFromHandPlay: null,
   pendingDestroyTargets: [],
+  antiChallenge: false,
+  antiModifier: false,
 }
 
 export const RESTOCK_HAND_AP_COST = 3
@@ -419,5 +425,7 @@ export function initGame(playerCount) {
     pendingHeroPlayChoice: null,
     pendingHeroFromHandPlay: null,
     pendingDestroyTargets: [],
+    antiChallenge: false,
+    antiModifier: false,
   }
 }

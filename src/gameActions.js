@@ -245,6 +245,9 @@ export function isPlayableFromHand(card, game, playerIndex) {
     if (card.type !== CARD_TYPES.MODIFIER) {
       return false
     }
+    if (game.antiModifier === true) {
+      return false
+    }
     return game.players[playerIndex].hand.some(
       (c) => c.instanceId === card.instanceId,
     )
@@ -254,8 +257,19 @@ export function isPlayableFromHand(card, game, playerIndex) {
     if (card.type !== CARD_TYPES.CHALLENGE) {
       return false
     }
+    if (game.antiChallenge === true) {
+      return false
+    }
     // Any player except the one who made the play can respond with a Challenge card
     return playerIndex !== game.pendingChallenge.stagedPlay.attackerIndex
+  }
+
+  if (card.type === CARD_TYPES.CHALLENGE && game.antiChallenge === true) {
+    return false
+  }
+
+  if (card.type === CARD_TYPES.MODIFIER && game.antiModifier === true) {
+    return false
   }
 
   if (playerIndex !== game.currentPlayerIndex) {
@@ -550,6 +564,10 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
     return { game, error: 'No play is open for a challenge.' }
   }
 
+  if (game.antiChallenge === true) {
+    return { game, error: 'Challenge cards are blocked right now.' }
+  }
+
   if (challengerIndex === game.pendingChallenge.stagedPlay.attackerIndex) {
     return { game, error: 'You cannot challenge your own play.' }
   }
@@ -814,6 +832,10 @@ export function playModifierOnPendingRoll(
 ) {
   if (!game.pendingRoll) {
     return { game, error: 'No roll is waiting for a modifier.' }
+  }
+
+  if (game.antiModifier === true) {
+    return { game, error: 'Modifier cards are blocked right now.' }
   }
 
   if (game.pendingRoll.rollType === 'challenge' && !challengeTarget) {

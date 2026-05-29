@@ -33,6 +33,41 @@ function updatePlayer(game, playerIndex, patch) {
   return { ...game, players }
 }
 
+/**
+ * Find which player owns a given hero (by instanceId) and the slot index.
+ * @param {GameState} game
+ * @param {string} heroInstanceId
+ * @returns {{ playerIndex: number, slotIndex: number } | null}
+ */
+function findHeroLocation(game, heroInstanceId) {
+  for (let pi = 0; pi < game.players.length; pi++) {
+    const slots = game.players[pi].partySlots
+    const si = slots.findIndex((s) => s?.hero.instanceId === heroInstanceId)
+    if (si !== -1) return { playerIndex: pi, slotIndex: si }
+  }
+  return null
+}
+
+/**
+ * Set or clear a boolean flag on a specific hero (by instanceId), wherever it lives.
+ * @param {GameState} game
+ * @param {string} heroInstanceId
+ * @param {'antiSteal' | 'antiDestroy'} flag
+ * @param {boolean} value
+ */
+function setHeroProtectionFlag(game, heroInstanceId, flag, value) {
+  const loc = findHeroLocation(game, heroInstanceId)
+  if (!loc) return { game, error: 'Hero not found.' }
+  const player = game.players[loc.playerIndex]
+  const partySlots = clonePartySlots(player.partySlots)
+  const slot = partySlots[loc.slotIndex]
+  partySlots[loc.slotIndex] = {
+    ...slot,
+    hero: { ...slot.hero, [flag]: value },
+  }
+  return { game: updatePlayer(game, loc.playerIndex, { partySlots }) }
+}
+
 /* ------------------------------------------------------------------ *
  * Atomic effects (each is a pure function that returns new GameState) *
  * ------------------------------------------------------------------ */
@@ -162,6 +197,11 @@ export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstan
   if (sourcePlayerIndex === targetPlayerIndex) {
     return { game, error: 'Use sacrifice to remove your own hero.' }
   }
+  const target = game.players[targetPlayerIndex]
+  const slot = target?.partySlots.find((s) => s?.hero.instanceId === heroInstanceId)
+  if (slot?.hero?.antiDestroy === true) {
+    return { game, error: 'That hero cannot be destroyed (antiDestroy).' }
+  }
   return removeHeroToDiscard(game, targetPlayerIndex, heroInstanceId)
 }
 
@@ -185,6 +225,9 @@ export function steal(game, { sourcePlayerIndex, targetPlayerIndex, heroInstance
   )
   if (targetSlotIndex === -1) {
     return { game, error: 'Hero not in target party.' }
+  }
+  if (target.partySlots[targetSlotIndex].hero.antiSteal === true) {
+    return { game, error: 'That hero cannot be stolen (antiSteal).' }
   }
   const sourceEmptyIndex = source.partySlots.findIndex((s) => s === null)
   if (sourceEmptyIndex === -1) {
@@ -397,5 +440,83 @@ export function searchDiscardPile(game, { playerIndex, instanceId }) {
     { hand: [...player.hand, withFaceUp(card)] },
   )
   return { game: next, card }
+}
+
+/* ------------------------------------------------------------- *
+ * Protection / "anti" effects                                    *
+ *  - Hero-level: antiSteal / antiDestroy live on the hero card   *
+ *  - Game-level: antiChallenge / antiModifier live on GameState  *
+ *                                                                *
+ * These atomic toggles only flip the flags. Enforcement happens  *
+ * in `steal` / `destroy` (above) and in the corresponding action *
+ * handlers in gameActions.js (challenge / modifier).             *
+ * ------------------------------------------------------------- */
+
+/**
+ * Mark a specific hero with antiSteal so STEAL cannot select it as a target.
+ * @param {GameState} game
+ * @param {{ heroInstanceId: string }} params
+ */
+export function applyAntiSteal(game, { heroInstanceId }) {
+  return setHeroProtectionFlag(game, heroInstanceId, 'antiSteal', true)
+}
+
+/**
+ * Clear antiSteal from a specific hero.
+ * @param {GameState} game
+ * @param {{ heroInstanceId: string }} params
+ */
+export function clearAntiSteal(game, { heroInstanceId }) {
+  return setHeroProtectionFlag(game, heroInstanceId, 'antiSteal', false)
+}
+
+/**
+ * Mark a specific hero with antiDestroy so DESTROY cannot select it as a target.
+ * @param {GameState} game
+ * @param {{ heroInstanceId: string }} params
+ */
+export function applyAntiDestroy(game, { heroInstanceId }) {
+  return setHeroProtectionFlag(game, heroInstanceId, 'antiDestroy', true)
+}
+
+/**
+ * Clear antiDestroy from a specific hero.
+ * @param {GameState} game
+ * @param {{ heroInstanceId: string }} params
+ */
+export function clearAntiDestroy(game, { heroInstanceId }) {
+  return setHeroProtectionFlag(game, heroInstanceId, 'antiDestroy', false)
+}
+
+/**
+ * Block all players from playing Challenge cards until cleared.
+ * @param {GameState} game
+ */
+export function applyAntiChallenge(game) {
+  return { game: { ...game, antiChallenge: true } }
+}
+
+/**
+ * Allow Challenge cards to be played again.
+ * @param {GameState} game
+ */
+export function clearAntiChallenge(game) {
+  return { game: { ...game, antiChallenge: false } }
+}
+
+/**
+ * Block all players from playing Modifier cards until cleared.
+ * @param {GameState} game
+ */
+export function applyAntiModifier(game) {
+  return { game: { ...game, antiModifier: true } }
+}
+
+/**
+ * Allow Modifier cards to be played again.
+ * @param {GameState} game
+ */
+export function clearAntiModifier(game) {
+  return { game: { ...game, antiModifier: false } }
 }
 
