@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ActiveMonsters from './components/ActiveMonsters.jsx'
 import CardDisplay from './components/CardDisplay.jsx'
+import CompactPlayerPanel from './components/CompactPlayerPanel.jsx'
 import DebugPanel from './components/DebugPanel.jsx'
 import DeckPile from './components/DeckPile.jsx'
 import CardPullDialog from './components/CardPullDialog.jsx'
 import EffectTargetDialog from './components/EffectTargetDialog.jsx'
 import ModifierChoiceDialog from './components/ModifierChoiceDialog.jsx'
 import ModifierTargetDialog from './components/ModifierTargetDialog.jsx'
-import PartyBoard from './components/PartyBoard.jsx'
 import RollFeedback from './components/RollFeedback.jsx'
 import SkillConfirmDialog from './components/SkillConfirmDialog.jsx'
 import { CARD_BACKS, CARD_TYPES } from './data/cardUtils.js'
@@ -74,10 +74,26 @@ import {
   RESTOCK_HAND_AP_COST,
   initGame,
 } from './gameState.js'
+import { openRoomChannel, saveGameState, loadGameState } from './roomSync.js'
 import './App.css'
 
-function App() {
-  const [game, setGame] = useState(() => initGame(3))
+function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
+  const isHost = mySeat === 0
+
+  // Game state init: try localStorage first (handles rejoins + non-host initial load).
+  // Host creates & saves fresh game if nothing stored yet.
+  const [game, setGame] = useState(() => {
+    if (roomCode) {
+      const stored = loadGameState(roomCode)
+      if (stored) return stored
+    }
+    if (isHost || !roomCode) {
+      const newGame = initGame(playerCount)
+      if (roomCode) saveGameState(roomCode, newGame)
+      return newGame
+    }
+    return null // Non-host, host hasn't joined yet
+  })
   const [skillDialog, setSkillDialog] = useState(null)
   const [modifierChoice, setModifierChoice] = useState(null)
   const [modifierTargetChoice, setModifierTargetChoice] = useState(null)
@@ -92,6 +108,95 @@ function App() {
   const [debugMessage, setDebugMessage] = useState(
     /** @type {string | null} */ (null),
   )
+
+  // BroadcastChannel refs
+  const channelRef = useRef(null)
+  const isFromBroadcastRef = useRef(false)
+  const gameRef = useRef(game)
+  useEffect(() => { gameRef.current = game }, [game])
+
+  // BroadcastChannel setup — only carries lightweight "STATE_CHANGED" signals.
+  // Full game state lives in localStorage so latecomers always find it.
+  useEffect(() => {
+    if (!roomCode) return
+    const channel = openRoomChannel(roomCode)
+    if (!channel) return
+    channelRef.current = channel
+
+    channel.onmessage = (e) => {
+      if (e.data.type === 'STATE_CHANGED') {
+        const newGame = loadGameState(roomCode)
+        if (newGame) {
+          isFromBroadcastRef.current = true
+          setGame(newGame)
+        }
+      }
+    }
+
+    return () => { channel.close(); channelRef.current = null }
+  }, [roomCode]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save to localStorage + notify other tabs whenever game state changes.
+  useEffect(() => {
+    if (!game || !roomCode) return
+    if (isFromBroadcastRef.current) { isFromBroadcastRef.current = false; return }
+    saveGameState(roomCode, game)
+    channelRef.current?.postMessage({ type: 'STATE_CHANGED' })
+  }, [game, roomCode])
+
+  // These three effects MUST be declared before any conditional return (React hooks rules).
+  // They use optional chaining so they're safe when game is null.
+  useEffect(() => {
+    if (!game?.pendingChallenge) return undefined
+    setChallengeSecondsLeft(Math.ceil(CHALLENGE_WINDOW_MS / 1000))
+    const interval = window.setInterval(() => {
+      setChallengeSecondsLeft((prev) => Math.max(0, prev - 1))
+    }, 1000)
+    const timeout = window.setTimeout(() => {
+      setGame((prev) => {
+        if (!prev?.pendingChallenge) return prev
+        const { game: nextGame, diceRoll } = passChallengeWindow(prev)
+        if (diceRoll) setDisplayRoll(diceRoll)
+        return nextGame
+      })
+    }, CHALLENGE_WINDOW_MS)
+    return () => { window.clearInterval(interval); window.clearTimeout(timeout) }
+  }, [game?.pendingChallenge]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!game?.pendingRoll) return undefined
+    setDisplayRoll(game.pendingRoll)
+    setModifierSecondsLeft(Math.ceil(MODIFIER_WINDOW_MS / 1000))
+    const interval = window.setInterval(() => {
+      setModifierSecondsLeft((prev) => Math.max(0, prev - 1))
+    }, 1000)
+    const timeout = window.setTimeout(() => {
+      setGame((prev) => {
+        if (!prev?.pendingRoll) return prev
+        const { game: nextGame, diceRoll } = passModifierPhaseWithResult(prev)
+        if (diceRoll) setDisplayRoll(diceRoll)
+        return nextGame
+      })
+    }, MODIFIER_WINDOW_MS)
+    return () => { window.clearInterval(interval); window.clearTimeout(timeout) }
+  }, [game?.pendingRoll]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (game?.pendingRoll || !displayRoll) return undefined
+    const timer = window.setTimeout(() => setDisplayRoll(null), 3000)
+    return () => window.clearTimeout(timer)
+  }, [game?.pendingRoll, displayRoll])
+
+  // — Null guard: non-host tabs show this until host saves initial game to localStorage —
+  if (!game) {
+    return (
+      <div className="waiting-screen">
+        <h2>⏳ Waiting for host to start the game…</h2>
+        <p>Room: <strong>{roomCode}</strong> · Your seat: <strong>Player {mySeat + 1}</strong></p>
+        <p className="waiting-screen__hint">Ask Player 1 to open their link first.</p>
+      </div>
+    )
+  }
 
   const currentPlayer = game.players[game.currentPlayerIndex]
   const modifierPhase = isModifierPhaseActive(game)
@@ -185,76 +290,6 @@ function App() {
     ? game.players[pendingDiscard.playerIndex]
     : null
 
-  useEffect(() => {
-    if (!game.pendingChallenge) {
-      return undefined
-    }
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setChallengeSecondsLeft(Math.ceil(CHALLENGE_WINDOW_MS / 1000))
-
-    const interval = window.setInterval(() => {
-      setChallengeSecondsLeft((prev) => Math.max(0, prev - 1))
-    }, 1000)
-
-    const timeout = window.setTimeout(() => {
-      setGame((prev) => {
-        if (!prev.pendingChallenge) {
-          return prev
-        }
-        const { game: nextGame, diceRoll } = passChallengeWindow(prev)
-        if (diceRoll) {
-          setDisplayRoll(diceRoll)
-        }
-        return nextGame
-      })
-    }, CHALLENGE_WINDOW_MS)
-
-    return () => {
-      window.clearInterval(interval)
-      window.clearTimeout(timeout)
-    }
-  }, [game.pendingChallenge])
-
-  useEffect(() => {
-    if (!game.pendingRoll) {
-      return undefined
-    }
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDisplayRoll(game.pendingRoll)
-    setModifierSecondsLeft(Math.ceil(MODIFIER_WINDOW_MS / 1000))
-
-    const interval = window.setInterval(() => {
-      setModifierSecondsLeft((prev) => Math.max(0, prev - 1))
-    }, 1000)
-
-    const timeout = window.setTimeout(() => {
-      setGame((prev) => {
-        if (!prev.pendingRoll) {
-          return prev
-        }
-        const { game: nextGame, diceRoll } = passModifierPhaseWithResult(prev)
-        if (diceRoll) {
-          setDisplayRoll(diceRoll)
-        }
-        return nextGame
-      })
-    }, MODIFIER_WINDOW_MS)
-
-    return () => {
-      window.clearInterval(interval)
-      window.clearTimeout(timeout)
-    }
-  }, [game.pendingRoll])
-
-  useEffect(() => {
-    if (game.pendingRoll || !displayRoll) {
-      return undefined
-    }
-    const timer = window.setTimeout(() => setDisplayRoll(null), 3000)
-    return () => window.clearTimeout(timer)
-  }, [game.pendingRoll, displayRoll])
 
   function handlePlayCard(card, playerIndex) {
     if (heroFromHandPlayPhase && heroFromHandPlay) {
@@ -724,7 +759,8 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className="game-layout">
+      {/* Phase/status overlays */}
       <RollFeedback
         pendingRoll={rollToShow}
         modifierPhaseActive={modifierPhase}
@@ -1009,361 +1045,265 @@ function App() {
         onChoose={handleSelectEffectTarget}
       />
 
-      <header className="game-header">
-        <h1>Here to Slay</h1>
-        <p className="game-header__status">
-          Current player: <strong>{currentPlayer.name}</strong>
-          {' · '}
-          Action points: <strong>{game.actionPoints}</strong> / 3
-          {!canPlay && !interruptPhase && !itemEquipInstanceId && (
-            <span className="game-header__warn"> (Not enough action points)</span>
-          )}
-          {itemEquipInstanceId && (
-            <span className="game-header__warn">
-              {' '}
-              —{' '}
-              {itemEquipIsCursed
-                ? 'Click a hero on an opponent\'s party to equip the cursed item (or click the item again to cancel)'
-                : 'Click a hero on your party to equip the item (or click the item again to cancel)'}
-            </span>
-          )}
-          {challengePhase && !modifierPhase && (
-            <span className="game-header__warn"> — Challenge window</span>
-          )}
-          {modifierPhase && (
-            <span className="game-header__warn"> — Modifier window (all players)</span>
-          )}
-          {targetSelectionPhase && (
-            <span className="game-header__warn">
-              {' '}
-              — {effectSourcePlayer?.name ?? 'Source'}: pick a target
-            </span>
-          )}
-          {heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection && (
-            <span className="game-header__warn">
-              {' '}
-              —{' '}
-              {game.players[game.pendingEffectHeroTargetSelection.sourcePlayerIndex]
-                ?.name ?? 'Player'}
-              : pick a hero to {heroTargetAction}
-            </span>
-          )}
-          {pendingDiscardPhase && (
-            <span className="game-header__warn">
-              {' '}
-              — {discardingPlayer?.name ?? 'Player'}
-              {pendingDiscard?.kind === 'opponentEach' ||
-              pendingDiscard?.kind === 'opponentEachPile'
-                ? ` must discard 1 (${pendingDiscard?.sourceLabel})`
-                : pendingDiscard?.optional
-                  ? ` may discard up to ${pendingDiscard.count} (or Pass)`
-                  : ` must discard ${pendingDiscard?.count}`}
-            </span>
-          )}
-          {pendingGivePhase && pendingGive && currentGiver && (
-            <span className="game-header__warn">
-              {' '}
-              — {currentGiver.name} must give 1 card ({pendingGive.sourceLabel})
-            </span>
-          )}
-          {heroFromHandPlayPhase && heroFromHandPlay && (
-            <span className="game-header__warn">
-              {' '}
-              — {game.players[heroFromHandPlay.sourcePlayerIndex]?.name} must play a Hero from hand ({heroFromHandPlay.sourceLabel})
-            </span>
-          )}
-          {stagedCardPickPhase && stagedCardPick && (
-            <span className="game-header__warn">
-              {' '}
-              — {game.players[stagedCardPick.sourcePlayerIndex]?.name}: pick 1
-              staged card
-            </span>
-          )}
-          {itemSelectionPhase && itemSelection && (
-            <span className="game-header__warn">
-              {' '}
-              — {game.players[itemSelection.sourcePlayerIndex]?.name}: click an equipped item to return it ({itemSelection.sourceLabel})
-            </span>
-          )}
-          {heroSelectionPhase && heroSelection && (
-            <span className="game-header__warn">
-              {' '}
-              — {game.players[heroSelection.sourcePlayerIndex]?.name}: pick a
-              hero ({heroSelection.scope === 'own'
-                ? 'your party'
-                : heroSelection.scope === 'opponents'
-                  ? "an opponent's party"
-                  : 'any party'}) to {heroSelection.action} ({heroSelection.sourceLabel})
-            </span>
-          )}
-        </p>
-        <div className="game-actions">
-          <button
-            type="button"
-            className="game-actions__btn"
-            onClick={handleDrawCard}
-            disabled={!canDraw}
-            title={`Costs ${DRAW_CARD_AP_COST} AP`}
-          >
-            Draw card ({DRAW_CARD_AP_COST} AP)
-          </button>
-          <button
-            type="button"
-            className="game-actions__btn"
-            onClick={handleRestockHand}
-            disabled={!canRestock}
-            title={`Costs ${RESTOCK_HAND_AP_COST} AP`}
-          >
-            {RESTOCK_HAND_ACTION_NAME} ({RESTOCK_HAND_AP_COST} AP)
-          </button>
-          <button
-            type="button"
-            className="game-actions__btn game-actions__btn--primary"
-            onClick={handleEndTurn}
-            disabled={interruptPhase}
-          >
-            End turn
-          </button>
-          <button
-            type="button"
-            className={`game-actions__btn debug-toggle${debugMode ? ' debug-toggle--on' : ''}`}
-            onClick={handleToggleDebugMode}
-            title="Toggle debug tools (saved in this browser)"
-          >
-            Debug {debugMode ? 'ON' : 'OFF'}
-          </button>
-        </div>
-      </header>
-
-      {debugMode && (
-        <DebugPanel onDraw={handleDebugDraw} lastMessage={debugMessage} />
-      )}
-
-      <div className="deck-zones">
-        <section className="game-section game-section--deck">
-          <h2>Main deck</h2>
-          <DeckPile
-            count={game.mainDeck.length}
-            backImageUrl={
-              game.mainDeck[0]?.backImageUrl ?? CARD_BACKS.MAIN
-            }
-            label="Main deck"
-            variant="main"
-          />
-          {game.discardPile.length > 0 && (
-            <p className="deck-zones__recycle-hint">
-              Discard pile: {game.discardPile.length} (reshuffles when deck is empty)
-            </p>
-          )}
-        </section>
-
-        <section className="game-section game-section--deck">
-          <h2>Monster deck</h2>
-          <DeckPile
-            count={game.monsterDeck.length}
-            backImageUrl={
-              game.monsterDeck[0]?.backImageUrl ?? CARD_BACKS.MONSTER
-            }
-            label="Monster deck"
-            variant="monster"
-          />
-        </section>
+      {/* Top: opponent panels */}
+      <div className="game-opponents">
+        {game.players
+          .map((player, playerIndex) => ({ player, playerIndex }))
+          .filter(({ playerIndex }) => playerIndex !== mySeat)
+          .map(({ player, playerIndex }) => {
+            const partyClickableForSelection = heroSelectionPhase && isPartyClickableForSelection(game, playerIndex)
+            const partyClickableForHeroTarget = heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, playerIndex)
+            const selectionMode = partyClickableForSelection
+              ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
+              : null
+            return (
+              <CompactPlayerPanel
+                key={player.id}
+                player={player}
+                isCurrent={playerIndex === game.currentPlayerIndex}
+                onHeroSkillClick={(hero) => handleHeroSkillClick(hero, playerIndex)}
+                heroSkillClickable={partyClickableForSelection || partyClickableForHeroTarget}
+                allowHeroClickWhenSkillUsed={partyClickableForSelection || partyClickableForHeroTarget}
+                onHeroEquipClick={
+                  itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed && playerIndex !== mySeat
+                    ? handleHeroEquipClick
+                    : undefined
+                }
+                heroEquipSelectable={itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed && playerIndex !== mySeat}
+                selectionMode={selectionMode}
+                pendingDestroyMode={qiBearPhase || partyClickableForHeroTarget}
+                pendingDestroyIds={game.pendingDestroyTargets}
+                onItemClick={itemSelectionPhase ? handleItemClick : undefined}
+                itemsSelectable={itemSelectionPhase}
+              />
+            )
+          })
+        }
       </div>
 
-      <section className="game-section">
-        <div className="battlefield">
-          <div className="battlefield__monsters">
-            <h2>Active monsters</h2>
-            <p className="game-section__hint">
+      {/* Middle: game table */}
+      <div className="game-table">
+
+        {/* Left: deck piles */}
+        <div className="game-table__left">
+          <section className="table-section table-section--deck">
+            <h3>Main deck</h3>
+            <DeckPile
+              count={game.mainDeck.length}
+              backImageUrl={game.mainDeck[0]?.backImageUrl ?? CARD_BACKS.MAIN}
+              label="Main deck"
+              variant="main"
+            />
+            {game.discardPile.length > 0 && (
+              <p className="deck-recycle-hint">Discard: {game.discardPile.length}</p>
+            )}
+          </section>
+          <section className="table-section table-section--deck">
+            <h3>Monster deck</h3>
+            <DeckPile
+              count={game.monsterDeck.length}
+              backImageUrl={game.monsterDeck[0]?.backImageUrl ?? CARD_BACKS.MONSTER}
+              label="Monster deck"
+              variant="monster"
+            />
+          </section>
+        </div>
+
+        {/* Center: active monsters */}
+        <div className="game-table__center">
+          <section className="table-section">
+            <h3>Active monsters</h3>
+            <p className="table-hint">
               {canAttackMonster
-                ? `Click a monster to ${ATTACK_MONSTER_ACTION_NAME} (${ATTACK_MONSTER_AP_COST} AP, then modifier window)`
-                : 'Attack Monster costs 2 AP during your turn'}
+                ? `Click to ${ATTACK_MONSTER_ACTION_NAME} (${ATTACK_MONSTER_AP_COST} AP)`
+                : 'Attack costs 2 AP on your turn'}
             </p>
             <ActiveMonsters
               monsters={game.activeMonsters}
               onAttack={handleAttackMonster}
               canAttack={canAttackMonster}
             />
-          </div>
-          <div className="battlefield__discard">
-            <h2>Discard pile</h2>
-            {game.discardPile.length === 0 ? (
-              <p className="discard-pile__empty">Empty</p>
-            ) : (
-              <div className="discard-pile">
-                <CardDisplay card={topDiscard} faceUp />
-                <span className="discard-pile__count">
-                  {game.discardPile.length}
-                </span>
-              </div>
+          </section>
+        </div>
+
+        {/* Right: discard pile */}
+        <div className="game-table__right">
+          <section className="table-section">
+            <h3>Discard</h3>
+            {game.discardPile.length === 0
+              ? <p className="discard-pile__empty">Empty</p>
+              : (
+                <div className="discard-pile">
+                  <CardDisplay card={topDiscard} faceUp />
+                  <span className="discard-pile__count">{game.discardPile.length}</span>
+                </div>
+              )
+            }
+          </section>
+        </div>
+      </div>
+
+      {/* Bottom: my section */}
+      <div className="game-my-section">
+
+        {/* Status + action buttons */}
+        <div className="my-section__header">
+          <p className="my-section__status">
+            Turn: <strong>{currentPlayer.name}</strong> · AP: <strong>{game.actionPoints}</strong>/3
+            {itemEquipInstanceId && (
+              <span className="status-warn">
+                {' '}— {itemEquipIsCursed
+                  ? 'Click opponent hero to equip cursed item'
+                  : 'Click your hero to equip item'}
+              </span>
             )}
+            {challengePhase && !modifierPhase && (
+              <span className="status-warn"> — Challenge window</span>
+            )}
+            {modifierPhase && (
+              <span className="status-warn"> — Modifier window</span>
+            )}
+            {targetSelectionPhase && (
+              <span className="status-warn"> — Pick a target</span>
+            )}
+            {pendingDiscardPhase && (
+              <span className="status-warn"> — Discard {pendingDiscard?.count}</span>
+            )}
+          </p>
+          <div className="my-section__actions">
+            <button
+              type="button"
+              className="game-actions__btn"
+              onClick={handleDrawCard}
+              disabled={!canDraw}
+              title={`Costs ${DRAW_CARD_AP_COST} AP`}
+            >
+              Draw ({DRAW_CARD_AP_COST} AP)
+            </button>
+            <button
+              type="button"
+              className="game-actions__btn"
+              onClick={handleRestockHand}
+              disabled={!canRestock}
+              title={`Costs ${RESTOCK_HAND_AP_COST} AP`}
+            >
+              {RESTOCK_HAND_ACTION_NAME} ({RESTOCK_HAND_AP_COST} AP)
+            </button>
+            <button
+              type="button"
+              className="game-actions__btn game-actions__btn--primary"
+              onClick={handleEndTurn}
+              disabled={interruptPhase}
+            >
+              End turn
+            </button>
+            <button
+              type="button"
+              className={`game-actions__btn debug-toggle${debugMode ? ' debug-toggle--on' : ''}`}
+              onClick={handleToggleDebugMode}
+            >
+              Debug {debugMode ? 'ON' : 'OFF'}
+            </button>
           </div>
         </div>
-      </section>
 
-      {game.players.map((player, playerIndex) => {
-        const isCurrent = playerIndex === game.currentPlayerIndex
-        const partyClickableForSelection =
-          heroSelectionPhase &&
-          isPartyClickableForSelection(game, playerIndex)
-        const partyClickableForHeroTarget =
-          heroTargetSelectionPhase &&
-          isPartyClickableForHeroTargetSelection(game, playerIndex)
-        const selectionMode = partyClickableForSelection
-          ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
-          : null
+        {debugMode && (
+          <DebugPanel onDraw={handleDebugDraw} lastMessage={debugMessage} />
+        )}
 
-        return (
-          <section key={`player-${player.id}`} className="game-section">
-            <h2>
-              {player.name}
-              {isCurrent && ' (current)'}
-              {partyClickableForSelection &&
-                ` — pick a hero to ${selectionMode}`}
-              {partyClickableForHeroTarget &&
-                ` — pick a hero to ${heroTargetAction}`}
-            </h2>
+        {/* My party + hand */}
+        <div className="my-section__board">
+          {/* Compact panel for my party */}
+          <CompactPlayerPanel
+            player={game.players[mySeat]}
+            isCurrent={mySeat === game.currentPlayerIndex}
+            isMe={true}
+            onHeroSkillClick={(hero) => handleHeroSkillClick(hero, mySeat)}
+            heroSkillClickable={
+              (mySeat === game.currentPlayerIndex && canPlay) ||
+              (heroSelectionPhase && isPartyClickableForSelection(game, mySeat)) ||
+              (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))
+            }
+            allowHeroClickWhenSkillUsed={
+              (heroSelectionPhase && isPartyClickableForSelection(game, mySeat)) ||
+              (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))
+            }
+            onHeroEquipClick={
+              itemEquipInstanceId !== null && !heroSelectionPhase && !itemEquipIsCursed
+                ? handleHeroEquipClick
+                : undefined
+            }
+            heroEquipSelectable={itemEquipInstanceId !== null && !heroSelectionPhase && !itemEquipIsCursed}
+            selectionMode={
+              heroSelectionPhase && isPartyClickableForSelection(game, mySeat)
+                ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
+                : null
+            }
+            pendingDestroyMode={qiBearPhase || (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))}
+            pendingDestroyIds={game.pendingDestroyTargets}
+            onItemClick={itemSelectionPhase ? handleItemClick : undefined}
+            itemsSelectable={itemSelectionPhase}
+          />
 
-            <PartyBoard
-              leader={player.leader}
-              leaderItems={player.leaderItems ?? []}
-              partySlots={player.partySlots}
-              slainMonsters={player.slainMonsters}
-              onHeroSkillClick={(hero) => handleHeroSkillClick(hero, playerIndex)}
-              heroSkillClickable={
-                (isCurrent && canPlay) || partyClickableForSelection || partyClickableForHeroTarget
-              }
-              allowHeroClickWhenSkillUsed={partyClickableForSelection || partyClickableForHeroTarget}
-              onHeroEquipClick={
-                itemEquipInstanceId !== null && !heroSelectionPhase &&
-                (itemEquipIsCursed ? !isCurrent : isCurrent)
-                  ? handleHeroEquipClick
-                  : undefined
-              }
-              heroEquipSelectable={
-                itemEquipInstanceId !== null &&
-                !heroSelectionPhase &&
-                (itemEquipIsCursed ? !isCurrent : isCurrent)
-              }
-              selectionMode={selectionMode}
-              pendingDestroyMode={qiBearPhase || partyClickableForHeroTarget}
-              pendingDestroyIds={game.pendingDestroyTargets}
-              onItemClick={itemSelectionPhase ? handleItemClick : undefined}
-              itemsSelectable={itemSelectionPhase}
-            />
-
+          {/* My hand */}
+          <div className="my-section__hand-area">
             <h3 className="hand-heading">Hand</h3>
             <p className="game-section__hint">
               {heroSelectionPhase && heroSelection
-                ? playerIndex === heroSelection.sourcePlayerIndex
-                  ? `Pick a hero on ${
-                      heroSelection.scope === 'own'
-                        ? 'your party'
-                        : heroSelection.scope === 'opponents'
-                          ? "an opponent's party"
-                          : 'any party'
-                    } to ${heroSelection.action === 'swapSource' ? 'swap (pick your hero first)' : heroSelection.action === 'swapTarget' ? 'swap (pick opponent hero)' : heroSelection.action}.`
-                  : `Waiting for ${
-                      game.players[heroSelection.sourcePlayerIndex]?.name
-                    } to pick a hero.`
-                : heroFromHandPlayPhase && heroFromHandPlay
-                  ? playerIndex === heroFromHandPlay.sourcePlayerIndex
-                    ? 'Play a Hero card from your hand (click a Hero below).'
-                    : `Waiting for ${game.players[heroFromHandPlay.sourcePlayerIndex]?.name} to play a Hero from hand.`
-                : pendingGivePhase && pendingGive
-                  ? playerIndex === currentGiverIndex
-                    ? `Give 1 card to ${game.players[pendingGive.targetPlayerIndex]?.name ?? 'Player'} (click below).`
-                    : `Waiting for ${currentGiver?.name ?? 'player'} to give a card.`
-                : stagedCardPickPhase && stagedCardPick
-                  ? playerIndex === stagedCardPick.sourcePlayerIndex
-                    ? 'Choose 1 staged card above to add to your hand.'
-                    : `Waiting for ${game.players[stagedCardPick.sourcePlayerIndex]?.name} to pick a staged card.`
-                  : pendingDiscardPhase
-                    ? playerIndex === pendingDiscard.playerIndex
-                      ? pendingDiscard.kind === 'opponentEach'
-                        ? `Discard 1 card for ${pendingDiscard.sourceLabel} (staged).`
-                        : pendingDiscard.kind === 'opponentEachPile'
-                          ? `Discard 1 card for ${pendingDiscard.sourceLabel} (Fighter party).`
-                          : pendingDiscard.optional
-                          ? `Discard up to ${pendingDiscard.count} more card${pendingDiscard.count === 1 ? '' : 's'} (click below or Pass).`
-                          : `Discard ${pendingDiscard.count} card${pendingDiscard.count === 1 ? '' : 's'}: click cards below.`
-                      : 'Waiting for opponent to discard.'
-                    : heroTargetSelectionPhase
-                      ? playerIndex === game.pendingEffectHeroTargetSelection?.sourcePlayerIndex
-                        ? `Pick a hero to ${heroTargetAction} (click on the party above).`
-                        : 'Waiting for opponent to pick a hero.'
-                      : targetSelectionPhase
-                        ? playerIndex === effectSel.sourcePlayerIndex
-                          ? 'Choose which player receives your hero effect.'
-                          : 'Waiting for opponent to choose a target.'
-                        : modifierPhase
-                          ? game.pendingRoll?.rollType === 'challenge'
-                            ? 'Any player: play Modifiers and choose which roll to change, or Pass.'
-                            : 'Any player: click Modifiers to change the roll. Play as many as you want, or Pass.'
-                          : challengePhase
-                            ? playerIndex !== challengeAttackerIndex
-                              ? 'Play a Challenge card to oppose this play, or wait.'
-                              : 'Waiting for opponents to challenge — or click Pass above.'
-                            : playerIndex === game.currentPlayerIndex
-                              ? 'Hero / Magic (1 AP, then challenge). Item: click item then a hero. Cursed Item: click item then an opponent hero. Draw (1 AP). Restock (3 AP).'
-                              : 'Waiting for your turn.'}
+                ? mySeat === heroSelection.sourcePlayerIndex
+                  ? `Pick a hero to ${heroSelection.action}.`
+                  : `Waiting for ${game.players[heroSelection.sourcePlayerIndex]?.name} to pick a hero.`
+                : pendingDiscardPhase
+                  ? mySeat === pendingDiscard.playerIndex
+                    ? `Discard ${pendingDiscard.count} card${pendingDiscard.count === 1 ? '' : 's'}: click below.`
+                    : 'Waiting for opponent to discard.'
+                  : modifierPhase
+                    ? 'Any player: play Modifiers, or Pass.'
+                    : challengePhase
+                      ? mySeat !== challengeAttackerIndex
+                        ? 'Play a Challenge card, or wait.'
+                        : 'Waiting for opponents — or Pass above.'
+                      : mySeat === game.currentPlayerIndex
+                        ? 'Hero/Magic (1 AP). Item: click item then hero. Draw (1 AP). Restock (3 AP).'
+                        : 'Waiting for your turn.'}
             </p>
             <div className="card-row hand-row">
-              {player.hand.length === 0 ? (
-                <p className="hand-empty">Empty hand</p>
-              ) : (
-                player.hand.map((card) => {
-                  const playable = isPlayableFromHand(card, game, playerIndex)
-                  const enabled = pendingDiscardPhase
-                    ? playable
-                    : pendingGivePhase
+              {game.players[mySeat].hand.length === 0
+                ? <p className="hand-empty">Empty hand</p>
+                : game.players[mySeat].hand.map((card) => {
+                    const playable = isPlayableFromHand(card, game, mySeat)
+                    const enabled = pendingDiscardPhase
                       ? playable
-                      : heroFromHandPlayPhase
-                        ? playable
-                    : heroTargetSelectionPhase
-                      ? false
-                      : targetSelectionPhase
-                        ? false
-                        : modifierPhase
-                          ? playable
-                          : challengePhase
-                            ? playable
-                            : playerIndex === game.currentPlayerIndex &&
-                              (itemEquipInstanceId
-                                ? itemEquipInstanceId === card.instanceId
-                                : canPlay && playable)
-
-                  const isSelectedItem =
-                    itemEquipInstanceId === card.instanceId
-
-                  return (
-                    <button
-                      key={card.instanceId}
-                      type="button"
-                      className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelectedItem ? ' hand-card--selected' : ''}`}
-                      onClick={() => {
-                        if (
-                          !pendingDiscardPhase &&
-                          itemEquipInstanceId &&
-                          card.instanceId === itemEquipInstanceId
-                        ) {
-                          setItemEquipInstanceId(null)
-                          setItemEquipIsCursed(false)
-                          return
-                        }
-                        handlePlayCard(card, playerIndex)
-                      }}
-                      disabled={!enabled && !isSelectedItem}
-                    >
-                      <CardDisplay card={card} faceUp={card.faceUp ?? true} />
-                    </button>
-                  )
-                })
-              )}
+                      : pendingGivePhase ? playable
+                      : heroFromHandPlayPhase ? playable
+                      : heroTargetSelectionPhase ? false
+                      : targetSelectionPhase ? false
+                      : modifierPhase ? playable
+                      : challengePhase ? playable
+                      : mySeat === game.currentPlayerIndex && (itemEquipInstanceId ? itemEquipInstanceId === card.instanceId : canPlay && playable)
+                    const isSelectedItem = itemEquipInstanceId === card.instanceId
+                    return (
+                      <button
+                        key={card.instanceId}
+                        type="button"
+                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelectedItem ? ' hand-card--selected' : ''}`}
+                        onClick={() => {
+                          if (!pendingDiscardPhase && itemEquipInstanceId && card.instanceId === itemEquipInstanceId) {
+                            setItemEquipInstanceId(null); setItemEquipIsCursed(false); return
+                          }
+                          handlePlayCard(card, mySeat)
+                        }}
+                        disabled={!enabled && !isSelectedItem}
+                      >
+                        <CardDisplay card={card} faceUp={card.faceUp ?? true} />
+                      </button>
+                    )
+                  })
+              }
             </div>
-          </section>
-        )
-      })}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

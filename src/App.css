@@ -1,29 +1,6 @@
-.app {
-  padding: 1.5rem;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.game-header {
-  margin-bottom: 1.5rem;
-}
-
-.game-header h1 {
-  margin: 0 0 0.5rem;
-  color: var(--text-h);
-}
-
-.game-header__status {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-  color: var(--text);
-}
-
-.game-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
+/* =====================================================
+   Button styles
+   ===================================================== */
 
 .game-actions__btn {
   padding: 0.5rem 1rem;
@@ -60,9 +37,13 @@
   color: #c9a227;
 }
 
+/* =====================================================
+   Debug panel
+   ===================================================== */
+
 .debug-panel {
-  margin-bottom: 1.25rem;
-  padding: 1rem 1.25rem;
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 1rem;
   border: 1px dashed #c9a227;
   border-radius: 10px;
   background: rgba(201, 162, 39, 0.08);
@@ -138,39 +119,9 @@
   color: var(--text-h);
 }
 
-.game-section {
-  margin-bottom: 1.75rem;
-}
-
-.game-section h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-  color: var(--text-h);
-}
-
-.hand-heading {
-  margin: 1.25rem 0 0.5rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-top: 1px solid var(--border);
-  padding-top: 0.75rem;
-}
-
-.deck-zones {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 2rem;
-  margin-bottom: 1.75rem;
-}
-
-.game-section--deck h2 {
-  margin-bottom: 0.5rem;
-}
+/* =====================================================
+   Card / hand styles
+   ===================================================== */
 
 .card-row {
   display: flex;
@@ -179,70 +130,6 @@
   gap: 0.5rem;
   overflow-x: auto;
   padding-bottom: 0.25rem;
-}
-
-.game-header__warn {
-  color: var(--accent);
-  font-size: 0.9rem;
-}
-
-.game-section__hint {
-  margin: -0.25rem 0 0.75rem;
-  font-size: 0.85rem;
-  color: var(--text);
-}
-
-.battlefield {
-  position: relative;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  min-height: 200px;
-  padding-right: 10rem;
-}
-
-.battlefield__monsters {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.battlefield__monsters h2,
-.battlefield__discard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-  color: var(--text-h);
-  text-align: center;
-}
-
-.battlefield__monsters .card-row {
-  justify-content: center;
-}
-
-.battlefield__discard {
-  position: absolute;
-  right: 0;
-  top: 0;
-  flex-shrink: 0;
-}
-
-.discard-pile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.discard-pile__empty {
-  margin: 0;
-  color: var(--text);
-  font-size: 0.9rem;
-}
-
-.discard-pile__count {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text-h);
 }
 
 .hand-row {
@@ -296,6 +183,25 @@
   box-shadow: 0 0 0 3px var(--accent-bg);
 }
 
+.hand-empty {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.hand-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* =====================================================
+   Phase bars (fixed overlay)
+   ===================================================== */
+
 .challenge-phase-bar {
   flex-direction: column;
   align-items: center;
@@ -316,15 +222,176 @@
   pointer-events: auto;
 }
 
-.deck-zones__recycle-hint {
-  margin: 0.5rem 0 0;
-  font-size: 0.8rem;
-  color: var(--text);
-  max-width: 140px;
+/* =====================================================
+   Discard pile
+   ===================================================== */
+
+.discard-pile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.hand-empty {
+.discard-pile__empty {
   margin: 0;
   color: var(--text);
   font-size: 0.9rem;
+}
+
+.discard-pile__count {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+/* =====================================================
+   Hint text
+   ===================================================== */
+
+.game-section__hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+/* =====================================================
+   Game layout — full viewport
+   ===================================================== */
+
+.game-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Opponents row — top */
+.game-opponents {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--border);
+  min-height: 0;
+}
+
+/* Middle table */
+.game-table {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.game-table__left {
+  flex-shrink: 0;
+  width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.game-table__center {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.game-table__right {
+  flex-shrink: 0;
+  width: 140px;
+}
+
+.table-section h3 {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.table-hint {
+  font-size: 0.75rem;
+  color: var(--text);
+  margin: 0 0 6px;
+}
+
+.deck-recycle-hint {
+  font-size: 0.75rem;
+  color: var(--text);
+  margin: 4px 0 0;
+}
+
+/* My section — bottom */
+.game-my-section {
+  flex-shrink: 0;
+  border-top: 2px solid var(--accent-border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  max-height: 45vh;
+}
+
+.my-section__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.my-section__status {
+  flex: 1;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.status-warn {
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.my-section__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.my-section__board {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.my-section__hand-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Waiting screen */
+.waiting-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100dvh;
+  gap: 12px;
+  color: var(--text-h);
 }
