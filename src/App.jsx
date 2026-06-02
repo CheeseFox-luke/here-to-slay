@@ -53,6 +53,9 @@ import {
   playChallengeCard,
   playHeroFromHandForPending,
   playItemOnHero,
+  playCursedItemOnHero,
+  resolveWindsOfChange,
+  isPendingItemSelectionActive,
   playModifierOnPendingRoll,
   restockHand,
   resolveCardPull,
@@ -84,6 +87,7 @@ function App() {
   const [itemEquipInstanceId, setItemEquipInstanceId] = useState(
     /** @type {string | null} */ (null),
   )
+  const [itemEquipIsCursed, setItemEquipIsCursed] = useState(false)
   const [debugMode, setDebugMode] = useState(() => loadDebugModeEnabled())
   const [debugMessage, setDebugMessage] = useState(
     /** @type {string | null} */ (null),
@@ -116,6 +120,8 @@ function App() {
   const qiBearPhase = isPendingQiBearSelectionActive(game)
   const qiBearSel = game.pendingQiBearSelection
   const heroPlayChoicePhase = isPendingHeroPlayChoiceActive(game)
+  const itemSelectionPhase = isPendingItemSelectionActive(game)
+  const itemSelection = game.pendingItemSelection ?? null
   const heroPlayChoice = game.pendingHeroPlayChoice
   const interruptPhase =
     modifierPhase ||
@@ -129,7 +135,8 @@ function App() {
     heroSelectionPhase ||
     qiBearPhase ||
     heroPlayChoicePhase ||
-    heroFromHandPlayPhase
+    heroFromHandPlayPhase ||
+    itemSelectionPhase
   const canPlay = game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId
   const canDraw =
     !interruptPhase &&
@@ -329,6 +336,13 @@ function App() {
 
     if (card.type === CARD_TYPES.ITEM) {
       setItemEquipInstanceId(card.instanceId)
+      setItemEquipIsCursed(false)
+      return
+    }
+
+    if (card.type === CARD_TYPES.CURSED_ITEM) {
+      setItemEquipInstanceId(card.instanceId)
+      setItemEquipIsCursed(true)
       return
     }
 
@@ -373,16 +387,21 @@ function App() {
     if (!itemEquipInstanceId) {
       return
     }
-    const { game: nextGame, error } = playItemOnHero(
-      game,
-      itemEquipInstanceId,
-      hero.instanceId,
-    )
+    const fn = itemEquipIsCursed ? playCursedItemOnHero : playItemOnHero
+    const { game: nextGame, error } = fn(game, itemEquipInstanceId, hero.instanceId)
     setItemEquipInstanceId(null)
+    setItemEquipIsCursed(false)
     if (error) {
       window.alert(error)
       return
     }
+    setGame(nextGame)
+  }
+
+  function handleItemClick(hero, item) {
+    if (!itemSelectionPhase) return
+    const { game: nextGame, error } = resolveWindsOfChange(game, hero.instanceId, item.instanceId)
+    if (error) { window.alert(error); return }
     setGame(nextGame)
   }
 
@@ -626,6 +645,7 @@ function App() {
     setModifierTargetChoice(null)
     setDisplayRoll(null)
     setItemEquipInstanceId(null)
+    setItemEquipIsCursed(false)
   }
 
   function handleResolveCardPull(instanceId) {
@@ -947,6 +967,16 @@ function App() {
         </div>
       )}
 
+      {itemSelectionPhase && itemSelection && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          <p className="challenge-phase-bar__text">
+            <strong>{game.players[itemSelection.sourcePlayerIndex]?.name}</strong>:
+            click an equipped item on any party to return it to its owner's hand
+            (<strong>{itemSelection.sourceLabel}</strong>).
+          </p>
+        </div>
+      )}
+
       <SkillConfirmDialog
         heroName={skillDialog?.heroName ?? ''}
         open={skillDialog !== null}
@@ -991,8 +1021,10 @@ function App() {
           {itemEquipInstanceId && (
             <span className="game-header__warn">
               {' '}
-              — Click a hero on your party to equip the item (or click the item
-              again to cancel)
+              —{' '}
+              {itemEquipIsCursed
+                ? 'Click a hero on an opponent\'s party to equip the cursed item (or click the item again to cancel)'
+                : 'Click a hero on your party to equip the item (or click the item again to cancel)'}
             </span>
           )}
           {challengePhase && !modifierPhase && (
@@ -1045,6 +1077,12 @@ function App() {
               {' '}
               — {game.players[stagedCardPick.sourcePlayerIndex]?.name}: pick 1
               staged card
+            </span>
+          )}
+          {itemSelectionPhase && itemSelection && (
+            <span className="game-header__warn">
+              {' '}
+              — {game.players[itemSelection.sourcePlayerIndex]?.name}: click an equipped item to return it ({itemSelection.sourceLabel})
             </span>
           )}
           {heroSelectionPhase && heroSelection && (
@@ -1172,7 +1210,7 @@ function App() {
           heroTargetSelectionPhase &&
           isPartyClickableForHeroTargetSelection(game, playerIndex)
         const selectionMode = partyClickableForSelection
-          ? heroSelection?.action ?? null
+          ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
           : null
 
         return (
@@ -1197,18 +1235,21 @@ function App() {
               }
               allowHeroClickWhenSkillUsed={partyClickableForSelection || partyClickableForHeroTarget}
               onHeroEquipClick={
-                isCurrent && itemEquipInstanceId !== null && !heroSelectionPhase
+                itemEquipInstanceId !== null && !heroSelectionPhase &&
+                (itemEquipIsCursed ? !isCurrent : isCurrent)
                   ? handleHeroEquipClick
                   : undefined
               }
               heroEquipSelectable={
-                isCurrent &&
                 itemEquipInstanceId !== null &&
-                !heroSelectionPhase
+                !heroSelectionPhase &&
+                (itemEquipIsCursed ? !isCurrent : isCurrent)
               }
               selectionMode={selectionMode}
               pendingDestroyMode={qiBearPhase || partyClickableForHeroTarget}
               pendingDestroyIds={game.pendingDestroyTargets}
+              onItemClick={itemSelectionPhase ? handleItemClick : undefined}
+              itemsSelectable={itemSelectionPhase}
             />
 
             <h3 className="hand-heading">Hand</h3>
@@ -1221,7 +1262,7 @@ function App() {
                         : heroSelection.scope === 'opponents'
                           ? "an opponent's party"
                           : 'any party'
-                    } to ${heroSelection.action}.`
+                    } to ${heroSelection.action === 'swapSource' ? 'swap (pick your hero first)' : heroSelection.action === 'swapTarget' ? 'swap (pick opponent hero)' : heroSelection.action}.`
                   : `Waiting for ${
                       game.players[heroSelection.sourcePlayerIndex]?.name
                     } to pick a hero.`
@@ -1264,7 +1305,7 @@ function App() {
                               ? 'Play a Challenge card to oppose this play, or wait.'
                               : 'Waiting for opponents to challenge — or click Pass above.'
                             : playerIndex === game.currentPlayerIndex
-                              ? 'Hero / Magic (1 AP, then challenge). Item: click item, then a hero. Draw (1 AP). Restock (3 AP).'
+                              ? 'Hero / Magic (1 AP, then challenge). Item: click item then a hero. Cursed Item: click item then an opponent hero. Draw (1 AP). Restock (3 AP).'
                               : 'Waiting for your turn.'}
             </p>
             <div className="card-row hand-row">
@@ -1307,6 +1348,7 @@ function App() {
                           card.instanceId === itemEquipInstanceId
                         ) {
                           setItemEquipInstanceId(null)
+                          setItemEquipIsCursed(false)
                           return
                         }
                         handlePlayCard(card, playerIndex)

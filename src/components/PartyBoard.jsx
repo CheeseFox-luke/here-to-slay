@@ -21,6 +21,8 @@ import './PartyBoard.css'
  *   selectionMode?: 'destroy' | 'steal' | 'sacrifice' | null
  *   pendingDestroyMode?: boolean
  *   pendingDestroyIds?: string[]
+ *   onItemClick?: (hero: import('../gameState.js').CardInstance, item: import('../gameState.js').CardInstance) => void
+ *   itemsSelectable?: boolean
  * }} props
  */
 function PartyBoard({
@@ -36,6 +38,8 @@ function PartyBoard({
   selectionMode = null,
   pendingDestroyMode = false,
   pendingDestroyIds = [],
+  onItemClick,
+  itemsSelectable = false,
 }) {
   return (
     <div className="party-board">
@@ -58,6 +62,7 @@ function PartyBoard({
                   hero={slot.hero}
                   items={slot.items}
                   skillUsedThisTurn={slot.skillUsedThisTurn}
+                  sealed={slot.items.some((item) => item.effectId === 'sealingKey')}
                   onHeroClick={onHeroSkillClick}
                   allowHeroClickWhenSkillUsed={allowHeroClickWhenSkillUsed}
                   heroClickable={heroSkillClickable}
@@ -66,6 +71,8 @@ function PartyBoard({
                   selectionMode={selectionMode}
                   pendingDestroyMode={pendingDestroyMode}
                   pendingDestroy={pendingDestroyIds.includes(slot.hero.instanceId)}
+                  onItemClick={onItemClick}
+                  itemsSelectable={itemsSelectable}
                 />
               ) : (
                 <div className="party-board__placeholder" aria-hidden />

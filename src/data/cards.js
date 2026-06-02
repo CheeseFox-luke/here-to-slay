@@ -205,29 +205,26 @@ export const heroCardsByClass = {
 export const heroCards = Object.values(heroCardsByClass).flat()
 
 export const itemCards = [
-  createCard('001', 'HtS-Base-001-Item.png', CARD_TYPES.ITEM),
-  createCard('002', 'HtS-Base-002-Item_2.png', CARD_TYPES.ITEM),
-  createCard('003', 'HtS-Base-003-Item.png', CARD_TYPES.ITEM),
-  createCard('004', 'HtS-Base-004-Item.png', CARD_TYPES.ITEM),
-  createCard('005', 'HtS-Base-005-Item.png', CARD_TYPES.ITEM),
-  createCard('006', 'HtS-Base-006-Item.png', CARD_TYPES.ITEM),
-  createCard('007', 'HtS-Base-007-Item.png', CARD_TYPES.ITEM),
-  createCard('008', 'HtS-Base-008-Item.png', CARD_TYPES.ITEM),
-  createCard('009', 'HtS-Base-009-Item.png', CARD_TYPES.ITEM),
-  createCard('010', 'HtS-Base-010-Item_2.png', CARD_TYPES.ITEM),
-  createCard('011', 'HtS-Base-011-Item_2.png', CARD_TYPES.ITEM),
-  createCard('012', 'HtS-Base-012-Item.png', CARD_TYPES.ITEM),
+  { ...createCard('004', 'HtS-Base-004-Item.png', CARD_TYPES.ITEM), name: 'Bard Mask', effectId: 'changeClass', targetClass: HERO_CLASSES.BARD, effect: 'The equipped hero\'s class becomes Bard.' },
+  { ...createCard('005', 'HtS-Base-005-Item.png', CARD_TYPES.ITEM), name: 'Ranger Mask', effectId: 'changeClass', targetClass: HERO_CLASSES.RANGER, effect: 'The equipped hero\'s class becomes Ranger.' },
+  { ...createCard('006', 'HtS-Base-006-Item.png', CARD_TYPES.ITEM), name: 'Wizard Mask', effectId: 'changeClass', targetClass: HERO_CLASSES.WIZARD, effect: 'The equipped hero\'s class becomes Wizard.' },
+  { ...createCard('007', 'HtS-Base-007-Item.png', CARD_TYPES.ITEM), name: 'Fighter Mask', effectId: 'changeClass', targetClass: HERO_CLASSES.FIGHTER, effect: 'The equipped hero\'s class becomes Fighter.' },
+  { ...createCard('008', 'HtS-Base-008-Item.png', CARD_TYPES.ITEM), name: 'Guardian Mask', effectId: 'changeClass', targetClass: HERO_CLASSES.GUARDIAN, effect: 'The equipped hero\'s class becomes Guardian.' },
+  { ...createCard('009', 'HtS-Base-009-Item.png', CARD_TYPES.ITEM), name: 'Thief Mask', effectId: 'changeClass', targetClass: HERO_CLASSES.THIEF, effect: 'The equipped hero\'s class becomes Thief.' },
+  { ...createCard('010', 'HtS-Base-010-Item_2.png', CARD_TYPES.ITEM), name: 'Really Big Ring', effectId: 'bigRing', effect: '+2 to the roll.' },
+  { ...createCard('011', 'HtS-Base-011-Item_2.png', CARD_TYPES.ITEM), name: 'Particularly Rusty Coin', effectId: 'rustyCoin', effect: 'If successfully roll to use, draw a card.' },
+  { ...createCard('012', 'HtS-Base-012-Item.png', CARD_TYPES.ITEM), name: 'Decoy Doll', effectId: 'decoyDoll', effect: 'If equipped hero would be sacrificed or destroyed, instead remove Decoy Doll to the discard pile.' },
 ]
 
 export const magicCards = [
-  createCard('013', 'HtS-Base-013-Magic_2.png', CARD_TYPES.MAGIC),
-  createCard('014', 'HtS-Base-014-Magic.png', CARD_TYPES.MAGIC),
-  createCard('015', 'HtS-Base-015-Magic_2.png', CARD_TYPES.MAGIC),
-  createCard('016', 'HtS-Base-016-Magic_2.png', CARD_TYPES.MAGIC),
-  createCard('017', 'HtS-Base-017-Magic_2.png', CARD_TYPES.MAGIC),
-  createCard('018', 'HtS-Base-018-Magic_2.png', CARD_TYPES.MAGIC),
-  createCard('019', 'HtS-Base-019-Magic.png', CARD_TYPES.MAGIC),
-  createCard('020', 'HtS-Base-020-Magic.png', CARD_TYPES.MAGIC),
+  { ...createCard('013', 'HtS-Base-013-Magic_2.png', CARD_TYPES.MAGIC), name: 'Enchanted Spell', effectId: 'enchantedSpell', effect: '+2 to all rolls until the end of the turn.' },
+  { ...createCard('014', 'HtS-Base-014-Magic.png', CARD_TYPES.MAGIC), name: 'Forceful Winds', effectId: 'forcefulWinds', effect: 'Return all equipped items to their respective owner\'s hand.' },
+  { ...createCard('015', 'HtS-Base-015-Magic_2.png', CARD_TYPES.MAGIC), name: 'Entangling Trap', effectId: 'entanglingTrap', effect: 'Discard 2 cards, then steal a hero. If you cannot discard 2 cards, the steal does not occur.' },
+  { ...createCard('016', 'HtS-Base-016-Magic_2.png', CARD_TYPES.MAGIC), name: 'Winds of Change', effectId: 'windsOfChange', effect: 'Return an equipped item to its owner\'s hand, then draw a card.' },
+  { ...createCard('017', 'HtS-Base-017-Magic_2.png', CARD_TYPES.MAGIC), name: 'Critical Boost', effectId: 'criticalBoost', effect: 'Draw 3 cards, then discard 1 card.' },
+  { ...createCard('018', 'HtS-Base-018-Magic_2.png', CARD_TYPES.MAGIC), name: 'Destructive Spell', effectId: 'destructiveSpell', effect: 'Discard 1 card, then destroy a hero.' },
+  { ...createCard('019', 'HtS-Base-019-Magic.png', CARD_TYPES.MAGIC), name: 'Call to the Fallen', effectId: 'callToFallen', effect: 'Search the discard pile for a Hero card and add it to your hand.' },
+  { ...createCard('020', 'HtS-Base-020-Magic.png', CARD_TYPES.MAGIC), name: 'Forced Exchange', effectId: 'forcedExchange', effect: 'Swap one of your heroes with an opponent\'s hero.' },
 ]
 
 /**
@@ -254,9 +251,31 @@ export const challengeCards = [
   createCard('026', 'HtS-Base-026-Challenge_14.png', CARD_TYPES.CHALLENGE),
 ]
 
-/** Item / Magic / Modifier / Challenge（玩家抽牌库组成部分） */
+export const cursedItemCards = [
+  {
+    ...createCard('001', 'HtS-Base-001-Item.png', CARD_TYPES.CURSED_ITEM),
+    name: 'Sealing Key',
+    effectId: 'sealingKey',
+    effect: 'You cannot use the equipped hero card\'s effect.',
+  },
+  {
+    ...createCard('002', 'HtS-Base-002-Item_2.png', CARD_TYPES.CURSED_ITEM),
+    name: 'Curse of the Snake\'s Eyes',
+    effectId: 'snakesEyesCurse',
+    effect: '-2 to that hero\'s roll.',
+  },
+  {
+    ...createCard('003', 'HtS-Base-003-Item.png', CARD_TYPES.CURSED_ITEM),
+    name: 'Suspiciously Shiny Coin',
+    effectId: 'shinyCoinCurse',
+    effect: 'If successfully roll to use this equipped hero\'s effect, discard a card.',
+  },
+]
+
+/** Item / Magic / Modifier / Challenge / CursedItem（玩家抽牌库组成部分） */
 export const actionCards = [
   ...itemCards,
+  ...cursedItemCards,
   ...magicCards,
   ...modifierCards,
   ...challengeCards,

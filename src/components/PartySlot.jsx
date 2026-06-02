@@ -14,12 +14,15 @@ import './PartySlot.css'
  *   selectionMode?: 'destroy' | 'steal' | 'sacrifice' | null
  *   pendingDestroyMode?: boolean
  *   pendingDestroy?: boolean
+ *   onItemClick?: (hero: import('../gameState.js').CardInstance, item: import('../gameState.js').CardInstance) => void
+ *   itemsSelectable?: boolean
  * }} props
  */
 function PartySlot({
   hero,
   items = [],
   skillUsedThisTurn = false,
+  sealed = false,
   onHeroClick,
   allowHeroClickWhenSkillUsed = false,
   heroClickable = false,
@@ -28,6 +31,8 @@ function PartySlot({
   selectionMode = null,
   pendingDestroyMode = false,
   pendingDestroy = false,
+  onItemClick,
+  itemsSelectable = false,
 }) {
   const canEquipItem =
     heroEquipSelectable && onHeroEquipClick
@@ -97,14 +102,31 @@ function PartySlot({
             Used
           </span>
         )}
+        {sealed && (
+          <span className="party-slot__skill-sealed" title="Skill sealed by Sealing Key">
+            Sealed
+          </span>
+        )}
       </div>
       {items.length > 0 && (
         <div className="party-slot__items">
-          {items.map((item) => (
-            <div key={item.instanceId} className="party-slot__item">
-              <CardDisplay card={item} faceUp={item.faceUp ?? true} />
-            </div>
-          ))}
+          {items.map((item) =>
+            itemsSelectable && onItemClick ? (
+              <button
+                key={item.instanceId}
+                type="button"
+                className="party-slot__item party-slot__item--selectable"
+                onClick={() => onItemClick(hero, item)}
+                title={`Return ${item.name} to hand`}
+              >
+                <CardDisplay card={item} faceUp={item.faceUp ?? true} />
+              </button>
+            ) : (
+              <div key={item.instanceId} className="party-slot__item">
+                <CardDisplay card={item} faceUp={item.faceUp ?? true} />
+              </div>
+            )
+          )}
         </div>
       )}
     </div>

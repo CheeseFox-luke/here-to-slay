@@ -13,13 +13,16 @@ import {
 } from './dice.js'
 import { runCardEffect } from './cardEffects.js'
 import {
+  changeHeroClass,
   destroy as destroyEffect,
   discard as discardEffect,
+  draw as drawEffect,
   give as giveEffect,
   pull as pullEffect,
   removeCardFromHand,
   sacrifice as sacrificeEffect,
   steal as stealEffect,
+  swapHero as swapHeroEffect,
 } from './effects.js'
 import {
   ATTACK_MONSTER_AP_COST,
@@ -42,6 +45,7 @@ export const PLAYABLE_CARD_TYPES = [
   CARD_TYPES.HERO,
   CARD_TYPES.MAGIC,
   CARD_TYPES.ITEM,
+  CARD_TYPES.CURSED_ITEM,
 ]
 
 export const RESTOCK_HAND_ACTION_NAME = 'Restock Hand'
@@ -94,6 +98,13 @@ export function isPendingStagedCardPickActive(game) {
  */
 export function isPendingHeroSelectionActive(game) {
   return game.pendingHeroSelection !== null
+}
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingItemSelectionActive(game) {
+  return (game.pendingItemSelection ?? null) !== null
 }
 
 /**
@@ -161,7 +172,8 @@ export function isInterruptPhaseActive(game) {
     isPendingHeroSelectionActive(game) ||
     isPendingQiBearSelectionActive(game) ||
     isPendingHeroPlayChoiceActive(game) ||
-    isPendingHeroFromHandPlayActive(game)
+    isPendingHeroFromHandPlayActive(game) ||
+    isPendingItemSelectionActive(game)
   )
 }
 
@@ -280,6 +292,10 @@ export function isPlayableFromHand(card, game, playerIndex) {
     return partyHasHero(game.players[playerIndex].partySlots)
   }
 
+  if (card.type === CARD_TYPES.CURSED_ITEM) {
+    return game.players.some((p, i) => i !== playerIndex && partyHasHero(p.partySlots))
+  }
+
   return PLAYABLE_CARD_TYPES.includes(card.type)
 }
 
@@ -308,6 +324,86 @@ export function resetPartySkillUsage(partySlots) {
 }
 
 /**
+ * Find the items equipped on a hero across all players' party slots.
+ * @param {GameState} game
+ * @param {string} heroInstanceId
+ * @returns {CardInstance[]}
+ */
+function findHeroItems(game, heroInstanceId) {
+  for (const player of game.players) {
+    const slot = player.partySlots.find((s) => s?.hero.instanceId === heroInstanceId)
+    if (slot) return slot.items
+  }
+  return []
+}
+
+/**
+ * Apply passive cursed-item roll penalties to a freshly rolled pendingRoll.
+ * @param {import('./gameState.js').PendingRoll} roll
+ * @param {CardInstance[]} items
+ * @param {number} [globalRollBonus]
+ * @returns {import('./gameState.js').PendingRoll}
+ */
+function applyHeroRollCurses(roll, items, globalRollBonus = 0) {
+  let result = roll
+  for (const item of items) {
+    if (item.effectId === 'snakesEyesCurse') {
+      result = applyDeltaToPendingRoll(result, -2, 'Curse of the Snake\'s Eyes')
+    }
+    if (item.effectId === 'bigRing') {
+      result = applyDeltaToPendingRoll(result, +2, 'Really Big Ring')
+    }
+  }
+  if (globalRollBonus) {
+    result = applyDeltaToPendingRoll(result, globalRollBonus, 'Enchanted Spell')
+  }
+  return result
+}
+
+/**
+ * After a successful hero roll, apply any passive on-success item effects on the rolling hero.
+ * Currently handles: Suspiciously Shiny Coin (discard 1), Particularly Rusty Coin (draw 1).
+ * @param {GameState} game - game state after the effect has resolved, pendingRoll already cleared
+ * @param {PendingRoll} pending - the roll that just resolved
+ * @returns {GameState}
+ */
+function applyOnSuccessItemEffects(game, pending) {
+  if (!pending.rollingHeroInstanceId) return game
+  const items = findHeroItems(game, pending.rollingHeroInstanceId)
+
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === pending.rollingHeroInstanceId),
+  )
+  if (ownerIndex === -1) return game
+
+  let result = game
+
+  for (const item of items) {
+    if (item.effectId === 'shinyCoinCurse') {
+      const count = Math.min(1, result.players[ownerIndex].hand.length)
+      if (count > 0) {
+        result = {
+          ...result,
+          pendingDiscard: {
+            playerIndex: ownerIndex,
+            sourcePlayerIndex: ownerIndex,
+            count,
+            sourceLabel: 'Suspiciously Shiny Coin',
+          },
+        }
+      }
+    }
+
+    if (item.effectId === 'rustyCoin') {
+      const { game: afterDraw } = drawEffect(result, { playerIndex: ownerIndex, count: 1 })
+      result = afterDraw
+    }
+  }
+
+  return result
+}
+
+/**
  * Attach effect metadata to a fresh hero pendingRoll (non-targeted heroes only).
  * @param {PendingRoll} pendingRoll
  * @param {CardInstance} heroCard
@@ -318,6 +414,7 @@ function attachHeroEffectMeta(pendingRoll, heroCard, sourcePlayerIndex) {
     ...pendingRoll,
     heroName: heroCard.name,
     targetLabel: `${heroCard.name} skill`,
+    rollingHeroInstanceId: heroCard.instanceId,
     ...(heroCard.effectId
       ? {
           effectId: heroCard.effectId,
@@ -366,6 +463,7 @@ function resolveStagedPlay(game, staged) {
         effectId: played.effectId,
         heroName: played.name,
         rollRequirement: played.rollRequirement ?? 6,
+        sourceHeroInstanceId: played.instanceId,
         count: 0,
         maxCount,
         heroTargets: [],
@@ -387,6 +485,7 @@ function resolveStagedPlay(game, staged) {
         effectId: played.effectId,
         heroName: played.name,
         rollRequirement: played.rollRequirement ?? 6,
+        sourceHeroInstanceId: played.instanceId,
       }
     } else {
       const baseRoll = rollForHeroEffect(played.rollRequirement ?? 6, attackerIndex)
@@ -394,6 +493,192 @@ function resolveStagedPlay(game, staged) {
     }
   } else if (cardType === CARD_TYPES.MAGIC) {
     discardPile = [...discardPile, played]
+    if (played.effectId === 'entanglingTrap') {
+      const attackerPlayer = game.players[attackerIndex]
+      const handAfterPlay = attackerPlayer.hand // card already removed in beginStagedPlay
+      if (handAfterPlay.length >= 2) {
+        const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+        return {
+          game: {
+            ...game,
+            players,
+            discardPile,
+            pendingDiscard: {
+              playerIndex: attackerIndex,
+              sourcePlayerIndex: attackerIndex,
+              count: 2,
+              sourceLabel: 'Entangling Trap',
+              afterEffect: 'stealHero',
+            },
+            pendingRoll: null,
+            pendingEffectTargetSelection: null,
+            pendingEffectHeroTargetSelection: null,
+            pendingQiBearSelection: null,
+          },
+          diceRoll: null,
+          error: null,
+        }
+      }
+      // Not enough cards — effect fizzles, card still goes to discard
+    }
+    if (played.effectId === 'forcefulWinds') {
+      const players = game.players.map((p) => {
+        const returnedItems = p.partySlots.flatMap((s) => s ? s.items.map((it) => ({ ...it, faceUp: false })) : [])
+        const clearedSlots = p.partySlots.map((s) => s ? { ...s, items: [] } : null)
+        return { ...p, partySlots: clearedSlots, hand: [...p.hand, ...returnedItems] }
+      })
+      return {
+        game: { ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+        diceRoll: null,
+        error: null,
+      }
+    }
+    if (played.effectId === 'windsOfChange') {
+      const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+      return {
+        game: {
+          ...game,
+          players,
+          discardPile,
+          pendingItemSelection: { sourcePlayerIndex: attackerIndex, sourceLabel: 'Winds of Change' },
+          pendingRoll: null,
+          pendingEffectTargetSelection: null,
+          pendingEffectHeroTargetSelection: null,
+          pendingQiBearSelection: null,
+        },
+        diceRoll: null,
+        error: null,
+      }
+    }
+    if (played.effectId === 'enchantedSpell') {
+      const bonus = (game.globalRollBonus ?? 0) + 2
+      const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+      return {
+        game: { ...game, players, discardPile, globalRollBonus: bonus, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+        diceRoll: null,
+        error: null,
+      }
+    }
+    if (played.effectId === 'criticalBoost') {
+      const { game: afterDraw } = drawEffect(game, { playerIndex: attackerIndex, count: 3 })
+      const players = afterDraw.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+      return {
+        game: {
+          ...afterDraw,
+          players,
+          discardPile,
+          pendingDiscard: {
+            playerIndex: attackerIndex,
+            sourcePlayerIndex: attackerIndex,
+            count: 1,
+            sourceLabel: 'Critical Boost',
+          },
+          pendingRoll: null,
+          pendingEffectTargetSelection: null,
+          pendingEffectHeroTargetSelection: null,
+          pendingQiBearSelection: null,
+        },
+        diceRoll: null,
+        error: null,
+      }
+    }
+    if (played.effectId === 'destructiveSpell') {
+      const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+      return {
+        game: {
+          ...game,
+          players,
+          discardPile,
+          pendingDiscard: {
+            playerIndex: attackerIndex,
+            sourcePlayerIndex: attackerIndex,
+            count: 1,
+            sourceLabel: 'Destructive Spell',
+            afterEffect: 'destroyHero',
+          },
+          pendingRoll: null,
+          pendingEffectTargetSelection: null,
+          pendingEffectHeroTargetSelection: null,
+          pendingQiBearSelection: null,
+        },
+        diceRoll: null,
+        error: null,
+      }
+    }
+    if (played.effectId === 'callToFallen') {
+      const heroesInDiscard = game.discardPile.filter((c) => c.type === 'Hero')
+      const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+      if (heroesInDiscard.length === 0) {
+        // No heroes in discard — fizzle
+        return {
+          game: { ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+          diceRoll: null,
+          error: null,
+        }
+      }
+      const discardWithoutHeroes = game.discardPile.filter((c) => c.type !== 'Hero')
+      if (heroesInDiscard.length === 1) {
+        const updatedPlayers = players.map((p, i) =>
+          i === attackerIndex ? { ...p, hand: [...p.hand, { ...heroesInDiscard[0], faceUp: true }] } : p,
+        )
+        return {
+          game: { ...game, players: updatedPlayers, discardPile: discardWithoutHeroes, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+          diceRoll: null,
+          error: null,
+        }
+      }
+      return {
+        game: {
+          ...game,
+          players,
+          discardPile: discardWithoutHeroes,
+          pendingStagedCardPick: {
+            sourcePlayerIndex: attackerIndex,
+            sourceLabel: 'Call to the Fallen',
+            stagedCards: heroesInDiscard.map((c) => ({ ...c, faceUp: true })),
+            source: 'discardPile',
+          },
+          pendingRoll: null,
+          pendingEffectTargetSelection: null,
+          pendingEffectHeroTargetSelection: null,
+          pendingQiBearSelection: null,
+        },
+        diceRoll: null,
+        error: null,
+      }
+    }
+    if (played.effectId === 'forcedExchange') {
+      const anyOwnHero = game.players[attackerIndex].partySlots.some((s) => s !== null)
+      const anyOpponentHero = game.players.some((p, i) => i !== attackerIndex && p.partySlots.some((s) => s !== null))
+      const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+      if (!anyOwnHero || !anyOpponentHero) {
+        // No valid swap possible — fizzle
+        return {
+          game: { ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+          diceRoll: null,
+          error: null,
+        }
+      }
+      return {
+        game: {
+          ...game,
+          players,
+          discardPile,
+          pendingHeroSelection: {
+            sourcePlayerIndex: attackerIndex,
+            scope: 'own',
+            action: 'swapSource',
+            sourceLabel: 'Forced Exchange',
+          },
+          pendingRoll: null,
+          pendingEffectTargetSelection: null,
+          pendingEffectHeroTargetSelection: null,
+          pendingQiBearSelection: null,
+        },
+        diceRoll: null,
+        error: null,
+      }
+    }
   } else if (cardType === CARD_TYPES.ITEM) {
     if (itemSlotIndex === undefined || itemSlotIndex < 0) {
       return { game, diceRoll: null, error: 'Invalid item target.' }
@@ -407,6 +692,41 @@ function resolveStagedPlay(game, staged) {
       ...slot,
       items: [...slot.items, played],
     }
+    if (played.targetClass) {
+      const heroInstanceId = partySlots[itemSlotIndex].hero.instanceId
+      const players = game.players.map((p, i) =>
+        i === attackerIndex ? { ...p, partySlots } : p,
+      )
+      const { game: afterClass } = changeHeroClass({ ...game, players }, {
+        heroInstanceId,
+        newClass: played.targetClass,
+      })
+      return { game: { ...afterClass, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null }, diceRoll: null, error: null }
+    }
+  } else if (cardType === CARD_TYPES.CURSED_ITEM) {
+    const tIdx = staged.targetPlayerIndex
+    if (tIdx === undefined || itemSlotIndex === undefined || itemSlotIndex < 0) {
+      return { game, diceRoll: null, error: 'Invalid cursed item target.' }
+    }
+    const targetSlots = clonePartySlots(game.players[tIdx].partySlots)
+    const tSlot = targetSlots[itemSlotIndex]
+    if (!tSlot) {
+      return { game, diceRoll: null, error: 'Target hero slot not found.' }
+    }
+    targetSlots[itemSlotIndex] = { ...tSlot, items: [...tSlot.items, played] }
+    const updatedPlayers = game.players.map((p, i) =>
+      i === tIdx ? { ...p, partySlots: targetSlots } : i === attackerIndex ? { ...p, partySlots } : p,
+    )
+    let resolvedGame = { ...game, players: updatedPlayers }
+    if (played.targetClass) {
+      const heroInstanceId = targetSlots[itemSlotIndex].hero.instanceId
+      const { game: afterClass } = changeHeroClass(resolvedGame, {
+        heroInstanceId,
+        newClass: played.targetClass,
+      })
+      resolvedGame = afterClass
+    }
+    return { game: resolvedGame, diceRoll: null, error: null }
   }
 
   const players = game.players.map((p, index) =>
@@ -432,8 +752,9 @@ function resolveStagedPlay(game, staged) {
  * @param {GameState} game
  * @param {string} instanceId
  * @param {number} [itemSlotIndex]
+ * @param {number} [targetPlayerIndex]
  */
-function beginStagedPlay(game, instanceId, itemSlotIndex) {
+function beginStagedPlay(game, instanceId, itemSlotIndex, targetPlayerIndex) {
   if (isInterruptPhaseActive(game)) {
     return { game, error: 'Finish the current window first.' }
   }
@@ -467,6 +788,26 @@ function beginStagedPlay(game, instanceId, itemSlotIndex) {
     }
   }
 
+  if (card.type === CARD_TYPES.CURSED_ITEM) {
+    const hasOpponentHero = game.players.some(
+      (p, i) => i !== playerIndex && partyHasHero(p.partySlots),
+    )
+    if (!hasOpponentHero) {
+      return { game, error: 'No opponent has a hero to equip this cursed item on.' }
+    }
+    if (targetPlayerIndex === undefined || itemSlotIndex === undefined) {
+      return { game, error: 'Choose an opponent hero to equip this cursed item.' }
+    }
+    const targetPlayer = game.players[targetPlayerIndex]
+    if (!targetPlayer || targetPlayerIndex === playerIndex) {
+      return { game, error: 'Choose an opponent hero.' }
+    }
+    const slot = targetPlayer.partySlots[itemSlotIndex]
+    if (!slot) {
+      return { game, error: 'Choose a hero in an opponent party.' }
+    }
+  }
+
   if (card.type === CARD_TYPES.HERO) {
     const emptyIndex = findFirstEmptyPartyIndex(player.partySlots)
     if (emptyIndex === -1) {
@@ -483,6 +824,7 @@ function beginStagedPlay(game, instanceId, itemSlotIndex) {
     attackerIndex: playerIndex,
     cardType: card.type,
     itemSlotIndex,
+    ...(targetPlayerIndex !== undefined ? { targetPlayerIndex } : {}),
   }
 
   const players = game.players.map((p, index) =>
@@ -517,6 +859,10 @@ export function playCardFromHand(game, instanceId) {
     return { game, diceRoll: null, error: 'Select a hero to equip this item.' }
   }
 
+  if (card.type === CARD_TYPES.CURSED_ITEM) {
+    return { game, diceRoll: null, error: 'Select an opponent hero to equip this cursed item.' }
+  }
+
   const { game: nextGame, error } = beginStagedPlay(game, instanceId)
   return { game: nextGame, diceRoll: null, error }
 }
@@ -539,6 +885,73 @@ export function playItemOnHero(game, instanceId, heroInstanceId) {
 
   const { game: nextGame, error } = beginStagedPlay(game, instanceId, slotIndex)
   return { game: nextGame, diceRoll: null, error }
+}
+
+/**
+ * @param {GameState} game
+ * @param {string} instanceId
+ * @param {string} heroInstanceId
+ */
+export function playCursedItemOnHero(game, instanceId, heroInstanceId) {
+  const playerIndex = game.currentPlayerIndex
+  for (let tIdx = 0; tIdx < game.players.length; tIdx++) {
+    if (tIdx === playerIndex) continue
+    const slotIndex = game.players[tIdx].partySlots.findIndex(
+      (slot) => slot?.hero.instanceId === heroInstanceId,
+    )
+    if (slotIndex !== -1) {
+      const { game: nextGame, error } = beginStagedPlay(game, instanceId, slotIndex, tIdx)
+      return { game: nextGame, diceRoll: null, error }
+    }
+  }
+  return { game, diceRoll: null, error: 'Hero not found in any opponent party.' }
+}
+
+/**
+ * Resolve "Winds of Change": return the chosen equipped item to its owner's hand,
+ * then the source player draws a card.
+ * @param {GameState} game
+ * @param {string} heroInstanceId - hero whose item is being returned
+ * @param {string} itemInstanceId - the item to return
+ */
+export function resolveWindsOfChange(game, heroInstanceId, itemInstanceId) {
+  const sel = game.pendingItemSelection
+  if (!sel) return { game, error: 'No item selection pending.' }
+
+  // Find the item's owner and slot
+  let ownerIndex = -1
+  let slotIndex = -1
+  for (let pi = 0; pi < game.players.length; pi++) {
+    const si = game.players[pi].partySlots.findIndex(
+      (s) => s?.hero.instanceId === heroInstanceId,
+    )
+    if (si !== -1) { ownerIndex = pi; slotIndex = si; break }
+  }
+  if (ownerIndex === -1) return { game, error: 'Hero not found.' }
+
+  const ownerSlot = game.players[ownerIndex].partySlots[slotIndex]
+  const item = ownerSlot.items.find((it) => it.instanceId === itemInstanceId)
+  if (!item) return { game, error: 'Item not found on that hero.' }
+
+  // Remove item from slot
+  const newItems = ownerSlot.items.filter((it) => it.instanceId !== itemInstanceId)
+  const newSlots = game.players[ownerIndex].partySlots.map((s, i) =>
+    i === slotIndex ? { ...s, items: newItems } : s,
+  )
+
+  // Return item (face-down) to owner's hand
+  const returnedItem = { ...item, faceUp: false }
+  let players = game.players.map((p, i) =>
+    i === ownerIndex
+      ? { ...p, partySlots: newSlots, hand: [...p.hand, returnedItem] }
+      : p,
+  )
+
+  let nextGame = { ...game, players, pendingItemSelection: null }
+
+  // Source player draws a card
+  const { game: afterDraw } = drawEffect(nextGame, { playerIndex: sel.sourcePlayerIndex, count: 1 })
+  return { game: afterDraw }
 }
 
 /**
@@ -693,6 +1106,14 @@ export function triggerHeroSkill(game, heroInstanceId) {
     }
   }
 
+  if (slot.items.some((item) => item.effectId === 'sealingKey')) {
+    return {
+      game,
+      diceRoll: null,
+      error: `${slot.hero.name}'s skill is sealed by Sealing Key.`,
+    }
+  }
+
   const partySlots = clonePartySlots(player.partySlots)
   partySlots[slotIndex] = { ...slot, skillUsedThisTurn: true }
 
@@ -712,6 +1133,7 @@ export function triggerHeroSkill(game, heroInstanceId) {
           effectId: slot.hero.effectId,
           heroName: slot.hero.name,
           rollRequirement: slot.hero.rollRequirement ?? 6,
+          sourceHeroInstanceId: slot.hero.instanceId,
           count: 0,
           maxCount,
           heroTargets: [],
@@ -753,6 +1175,7 @@ export function triggerHeroSkill(game, heroInstanceId) {
           effectId: slot.hero.effectId,
           heroName: slot.hero.name,
           rollRequirement: slot.hero.rollRequirement ?? 6,
+          sourceHeroInstanceId: slot.hero.instanceId,
         },
       },
       diceRoll: null,
@@ -760,7 +1183,8 @@ export function triggerHeroSkill(game, heroInstanceId) {
   }
 
   const baseRoll = rollForHeroEffect(slot.hero.rollRequirement ?? 6, playerIndex)
-  const pendingRoll = attachHeroEffectMeta(baseRoll, slot.hero, playerIndex)
+  const cursedRoll = applyHeroRollCurses(baseRoll, slot.items, game.globalRollBonus ?? 0)
+  const pendingRoll = attachHeroEffectMeta(cursedRoll, slot.hero, playerIndex)
 
   return {
     game: {
@@ -798,13 +1222,16 @@ export function attackMonster(game, monsterInstanceId) {
     return { game, diceRoll: null, error: 'Monster not found.' }
   }
 
-  const pendingRoll = rollForMonsterAttack(
+  let pendingRoll = rollForMonsterAttack(
     monster.instanceId,
     monster.name,
     playerIndex,
     monster.failAtOrBelow ?? 5,
     monster.successAtOrAbove ?? 8,
   )
+  if (game.globalRollBonus) {
+    pendingRoll = applyDeltaToPendingRoll(pendingRoll, game.globalRollBonus, 'Enchanted Spell')
+  }
 
   return {
     game: {
@@ -914,10 +1341,9 @@ function finalizeHeroRoll(game) {
   const success = pending.currentSum >= requirement
 
   if (!pending.effectId || !success) {
-    return {
-      game: { ...game, pendingRoll: null, pendingDestroyTargets: [] },
-      diceRoll: null,
-    }
+    const resolvedGame = { ...game, pendingRoll: null, pendingDestroyTargets: [] }
+    const gameWithCoin = success ? applyOnSuccessItemEffects(resolvedGame, pending) : resolvedGame
+    return { game: gameWithCoin, diceRoll: null }
   }
 
   const { game: afterEffect, error } = runCardEffect(game, pending.effectId, {
@@ -929,8 +1355,10 @@ function finalizeHeroRoll(game) {
     sourceHeroInstanceId: pending.sourceHeroInstanceId,
   })
 
+  const resolvedGame = { ...afterEffect, pendingRoll: null, pendingDestroyTargets: [] }
+  const gameWithCoin = applyOnSuccessItemEffects(resolvedGame, pending)
   return {
-    game: { ...afterEffect, pendingRoll: null, pendingDestroyTargets: [] },
+    game: gameWithCoin,
     diceRoll: null,
     effectError: error,
   }
@@ -1001,14 +1429,17 @@ export function selectEffectTarget(game, targetPlayerIndex) {
 
   // 目标已确认，现在才投骰并开 modifier 窗口
   const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
+  const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
+  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)
   /** @type {PendingRoll} */
   const pendingRoll = {
-    ...baseRoll,
+    ...cursedRoll,
     heroName: sel.heroName,
     targetLabel: `${sel.heroName} → ${targetName}`,
     effectId: sel.effectId,
     effectSourcePlayerIndex: sel.sourcePlayerIndex,
     effectTargetPlayerIndex: targetPlayerIndex,
+    rollingHeroInstanceId: sel.sourceHeroInstanceId,
   }
 
   return {
@@ -1132,14 +1563,17 @@ export function selectEffectHeroTarget(game, heroInstanceId) {
 
   // Target confirmed — roll dice and open modifier window
   const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
+  const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
+  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)
   /** @type {PendingRoll} */
   const pendingRoll = {
-    ...baseRoll,
+    ...cursedRoll,
     heroName: sel.heroName,
     targetLabel: `${sel.heroName} → ${targetHeroName}`,
     effectId: sel.effectId,
     effectSourcePlayerIndex: sel.sourcePlayerIndex,
     sourceHeroInstanceId: sel.sourceHeroInstanceId,
+    rollingHeroInstanceId: sel.sourceHeroInstanceId,
   }
 
   return {
@@ -1228,9 +1662,11 @@ export function confirmQiBearSelection(game, sourcePlayerIndex) {
   }
 
   const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
+  const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
+  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)
   /** @type {PendingRoll} */
   const pendingRoll = {
-    ...baseRoll,
+    ...cursedRoll,
     heroName: sel.heroName,
     targetLabel:
       sel.count > 0
@@ -1239,6 +1675,7 @@ export function confirmQiBearSelection(game, sourcePlayerIndex) {
     effectId: sel.effectId,
     effectSourcePlayerIndex: sel.sourcePlayerIndex,
     qiBearCount: sel.count,
+    rollingHeroInstanceId: sel.sourceHeroInstanceId,
   }
 
   return {
@@ -1308,6 +1745,27 @@ export function selectHeroForPendingAction(game, partyOwnerIndex, heroInstanceId
       sourcePlayerIndex: sel.sourcePlayerIndex,
       targetPlayerIndex: partyOwnerIndex,
       heroInstanceId,
+    })
+  } else if (sel.action === 'swapSource') {
+    // First step of Forced Exchange: record the chosen hero, open opponent selection
+    return {
+      game: {
+        ...game,
+        pendingHeroSelection: {
+          ...sel,
+          action: 'swapTarget',
+          scope: 'opponents',
+          swapSourceHeroInstanceId: heroInstanceId,
+          swapSourcePlayerIndex: partyOwnerIndex,
+        },
+      },
+    }
+  } else if (sel.action === 'swapTarget') {
+    result = swapHeroEffect(game, {
+      playerAIndex: sel.swapSourcePlayerIndex,
+      heroAInstanceId: sel.swapSourceHeroInstanceId,
+      playerBIndex: partyOwnerIndex,
+      heroBInstanceId: heroInstanceId,
     })
   } else {
     return { game, error: `Unknown hero-selection action: ${sel.action}` }
@@ -1407,10 +1865,13 @@ export function pickStagedCard(game, playerIndex, instanceId) {
   }
 
   const remainder = pick.stagedCards.filter((c) => c.instanceId !== instanceId)
-  const discardPile = [
-    ...game.discardPile,
-    ...remainder.map((c) => withFaceUp(c)),
-  ]
+  let discardPile
+  if (pick.source === 'discardPile') {
+    // remainder goes back to discard pile (they were temporarily pulled out for display)
+    discardPile = [...game.discardPile, ...remainder.map((c) => withFaceUp(c))]
+  } else {
+    discardPile = [...game.discardPile, ...remainder.map((c) => withFaceUp(c))]
+  }
   const players = game.players.map((p, index) =>
     index === pick.sourcePlayerIndex
       ? { ...p, hand: [...p.hand, withFaceUp(chosen)] }
@@ -1582,6 +2043,50 @@ export function discardForPendingDiscard(game, playerIndex, instanceId) {
     }
   }
 
+  if (remaining === 0 && pending.afterEffect === 'destroyHero') {
+    const anyHero = afterDiscard.players.some((p) =>
+      p.partySlots.some((s) => s !== null),
+    )
+    return {
+      game: {
+        ...afterDiscard,
+        pendingDiscard: null,
+        ...(anyHero
+          ? {
+              pendingHeroSelection: {
+                sourcePlayerIndex: pending.sourcePlayerIndex,
+                scope: 'any',
+                action: 'destroy',
+                sourceLabel: pending.sourceLabel,
+              },
+            }
+          : {}),
+      },
+    }
+  }
+
+  if (remaining === 0 && pending.afterEffect === 'stealHero') {
+    const hasOpponentHero = afterDiscard.players.some((p, i) =>
+      i !== pending.sourcePlayerIndex && p.partySlots.some((s) => s !== null),
+    )
+    return {
+      game: {
+        ...afterDiscard,
+        pendingDiscard: null,
+        ...(hasOpponentHero
+          ? {
+              pendingHeroSelection: {
+                sourcePlayerIndex: pending.sourcePlayerIndex,
+                scope: 'opponents',
+                action: 'steal',
+                sourceLabel: pending.sourceLabel,
+              },
+            }
+          : {}),
+      },
+    }
+  }
+
   return {
     game: {
       ...afterDiscard,
@@ -1737,6 +2242,8 @@ export function endTurn(game) {
     pendingHeroPlayChoice: null,
     pendingHeroFromHandPlay: null,
     pendingDestroyTargets: [],
+    globalRollBonus: 0,
+    pendingItemSelection: null,
   }
 }
 

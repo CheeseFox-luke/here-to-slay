@@ -62,6 +62,8 @@ export function partyHasHero(partySlots) {
  * @property {string} instanceId
  * @property {boolean} faceUp
  * @property {HeroClass} [class]
+ * @property {HeroClass} [originalClass]
+ * @property {HeroClass} [targetClass]
  * @property {boolean} [isLarge]
  * @property {number} [rollRequirement]
  * @property {import('./data/modifierEffects.js').ModifierEffect} [modifierEffect]
@@ -92,6 +94,7 @@ export function partyHasHero(partySlots) {
  * @property {number} attackerIndex
  * @property {import('./data/cardUtils.js').CardType} cardType
  * @property {number} [itemSlotIndex]
+ * @property {number} [targetPlayerIndex]
  */
 
 /**
@@ -132,6 +135,8 @@ export function partyHasHero(partySlots) {
  * @property {number} [qiBearCount]
  * @property {string} [sourceHeroInstanceId] - instanceId of the hero whose skill
  *   triggered this roll (e.g. Tipsy Tootie itself, needed for swap).
+ * @property {string} [rollingHeroInstanceId] - instanceId of the hero rolling
+ *   (always set for hero rolls; used to check passive cursed-item effects on finalize).
  */
 
 /**
@@ -151,6 +156,7 @@ export function partyHasHero(partySlots) {
  * @property {number[]} [opponentDiscardQueue] - remaining opponents who must discard
  * @property {CardInstance[]} [stagedCards] - cards held out
  *   of the discard pile during Beary Wise
+ * @property {string} [afterEffect] - effect to chain after discard completes (e.g. 'stealHero')
  */
 
 /**
@@ -185,6 +191,7 @@ export function partyHasHero(partySlots) {
  * @property {number} sourcePlayerIndex
  * @property {string} sourceLabel
  * @property {CardInstance[]} stagedCards
+ * @property {'discardPile'} [source] - if set, remainder cards go back to discard pile instead of being discarded
  */
 
 /**
@@ -214,6 +221,7 @@ export function partyHasHero(partySlots) {
  * @property {string} effectId
  * @property {string} heroName
  * @property {number} rollRequirement
+ * @property {string} [sourceHeroInstanceId]
  */
 
 /**
@@ -242,6 +250,7 @@ export function partyHasHero(partySlots) {
  * @property {number} count - currently chosen discard/destroy count (0..maxCount)
  * @property {number} maxCount - min(3, hand size at trigger time)
  * @property {string[]} heroTargets - instanceIds of heroes chosen to destroy
+ * @property {string} [sourceHeroInstanceId]
  */
 
 /**
@@ -253,10 +262,12 @@ export function partyHasHero(partySlots) {
  * @property {'own' | 'opponents' | 'any' | 'specific'} scope - which parties are valid;
  *   'specific' restricts to a single player identified by `targetPlayerIndex`
  * @property {number} [targetPlayerIndex] - required when scope === 'specific'
- * @property {'destroy' | 'steal' | 'sacrifice'} action - which atomic effect to run
+ * @property {'destroy' | 'steal' | 'sacrifice' | 'swapSource' | 'swapTarget'} action - which atomic effect to run
  * @property {string} sourceLabel - label shown in the UI (e.g. card name)
  * @property {PendingDiscard | null} [afterPendingDiscard] - continuation to
  *   restore as `pendingDiscard` once the selection completes (Qi Bear chain).
+ * @property {string} [swapSourceHeroInstanceId] - for swapTarget: instanceId of the first-picked hero
+ * @property {number} [swapSourcePlayerIndex] - for swapTarget: party owner of first-picked hero
  */
 
 /**
@@ -302,6 +313,14 @@ export function partyHasHero(partySlots) {
  *   destruction by an in-progress effect; cleared when the effect resolves or the turn ends
  * @property {boolean} [antiChallenge] - while true, no player may play a Challenge card.
  * @property {boolean} [antiModifier] - while true, no player may play a Modifier card.
+ * @property {number} [globalRollBonus] - flat bonus added to every roll until end of turn.
+ * @property {PendingItemSelection | null} [pendingItemSelection]
+ */
+
+/**
+ * @typedef {Object} PendingItemSelection
+ * @property {number} sourcePlayerIndex - player who triggered the effect
+ * @property {string} sourceLabel
  */
 
 /**

@@ -1,10 +1,11 @@
-/** @typedef {'Hero' | 'Item' | 'Magic' | 'Modifier' | 'Challenge' | 'Monster' | 'Leader'} CardType */
+/** @typedef {'Hero' | 'Item' | 'CursedItem' | 'Magic' | 'Modifier' | 'Challenge' | 'Monster' | 'Leader'} CardType */
 /** @typedef {'Fighter' | 'Bard' | 'Guardian' | 'Ranger' | 'Thief' | 'Wizard' | 'Hero'} HeroClass */
 /** @typedef {'gte' | 'lte'} RollComparison */
 
 export const CARD_TYPES = {
   HERO: 'Hero',
   ITEM: 'Item',
+  CURSED_ITEM: 'CursedItem',
   MAGIC: 'Magic',
   MODIFIER: 'Modifier',
   CHALLENGE: 'Challenge',

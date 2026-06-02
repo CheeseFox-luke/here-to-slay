@@ -170,6 +170,32 @@ function removeHeroToDiscard(game, ownerPlayerIndex, heroInstanceId) {
 }
 
 /**
+ * If the target hero has a Decoy Doll equipped, remove the doll to the discard pile
+ * instead of applying the effect. Returns `{ game, blocked: true }` when intercepted.
+ * @param {GameState} game
+ * @param {number} ownerPlayerIndex
+ * @param {string} heroInstanceId
+ * @returns {{ game: GameState, blocked: boolean }}
+ */
+function tryDecoyDoll(game, ownerPlayerIndex, heroInstanceId) {
+  const owner = game.players[ownerPlayerIndex]
+  if (!owner) return { game, blocked: false }
+  const slotIndex = owner.partySlots.findIndex((s) => s?.hero.instanceId === heroInstanceId)
+  if (slotIndex === -1) return { game, blocked: false }
+  const slot = owner.partySlots[slotIndex]
+  const dollIndex = slot.items.findIndex((item) => item.effectId === 'decoyDoll')
+  if (dollIndex === -1) return { game, blocked: false }
+
+  const doll = slot.items[dollIndex]
+  const newItems = slot.items.filter((_, i) => i !== dollIndex)
+  const slots = clonePartySlots(owner.partySlots)
+  slots[slotIndex] = { ...slot, items: newItems }
+  const discardPile = [...game.discardPile, withFaceUp(doll)]
+  const next = { ...updatePlayer(game, ownerPlayerIndex, { partySlots: slots }), discardPile }
+  return { game: next, blocked: true }
+}
+
+/**
  * SACRIFICE: a player sends one of *their own* heroes to the discard pile.
  * `playerIndex` here is both the source AND the owner of the hero. The scope
  * restriction (only your own heroes) is the caller's responsibility.
@@ -178,7 +204,9 @@ function removeHeroToDiscard(game, ownerPlayerIndex, heroInstanceId) {
  * @param {{ playerIndex: number, heroInstanceId: string }} params
  */
 export function sacrifice(game, { playerIndex, heroInstanceId }) {
-  return removeHeroToDiscard(game, playerIndex, heroInstanceId)
+  const { game: after, blocked } = tryDecoyDoll(game, playerIndex, heroInstanceId)
+  if (blocked) return { game: after }
+  return removeHeroToDiscard(after, playerIndex, heroInstanceId)
 }
 
 /**
@@ -202,7 +230,9 @@ export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstan
   if (slot?.hero?.antiDestroy === true) {
     return { game, error: 'That hero cannot be destroyed (antiDestroy).' }
   }
-  return removeHeroToDiscard(game, targetPlayerIndex, heroInstanceId)
+  const { game: after, blocked } = tryDecoyDoll(game, targetPlayerIndex, heroInstanceId)
+  if (blocked) return { game: after }
+  return removeHeroToDiscard(after, targetPlayerIndex, heroInstanceId)
 }
 
 /**
@@ -518,5 +548,31 @@ export function applyAntiModifier(game) {
  */
 export function clearAntiModifier(game) {
   return { game: { ...game, antiModifier: false } }
+}
+
+/**
+ * Change a hero's class to a new class, wherever they are in any party.
+ * The original class is preserved as `originalClass` on the hero card instance
+ * so it can be inspected later.
+ *
+ * @param {GameState} game
+ * @param {{ heroInstanceId: string, newClass: import('./data/cardUtils.js').HeroClass }} params
+ */
+export function changeHeroClass(game, { heroInstanceId, newClass }) {
+  const loc = findHeroLocation(game, heroInstanceId)
+  if (!loc) return { game, error: 'Hero not found.' }
+
+  const { playerIndex, slotIndex } = loc
+  const slots = clonePartySlots(game.players[playerIndex].partySlots)
+  const slot = slots[slotIndex]
+  slots[slotIndex] = {
+    ...slot,
+    hero: {
+      ...slot.hero,
+      originalClass: slot.hero.originalClass ?? slot.hero.class,
+      class: newClass,
+    },
+  }
+  return { game: updatePlayer(game, playerIndex, { partySlots: slots }) }
 }
 
