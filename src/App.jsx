@@ -74,7 +74,7 @@ import {
   RESTOCK_HAND_AP_COST,
   initGame,
 } from './gameState.js'
-import { openRoomChannel, saveGameState, loadGameState } from './roomSync.js'
+import { saveGameState, loadGameState } from './roomSync.js'
 import './App.css'
 
 function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
@@ -109,77 +109,101 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     /** @type {string | null} */ (null),
   )
 
-  // BroadcastChannel refs
-  const channelRef = useRef(null)
-  const isFromBroadcastRef = useRef(false)
-  const gameRef = useRef(game)
-  useEffect(() => { gameRef.current = game }, [game])
+  // Flag to skip re-saving state that we just received from another tab.
+  const isFromStorageRef = useRef(false)
 
-  // BroadcastChannel setup — only carries lightweight "STATE_CHANGED" signals.
-  // Full game state lives in localStorage so latecomers always find it.
+  // Listen for game state changes written by other tabs via localStorage.
+  // The native 'storage' event fires on every same-origin tab EXCEPT the one
+  // that made the write, so no explicit message passing is needed.
   useEffect(() => {
     if (!roomCode) return
-    const channel = openRoomChannel(roomCode)
-    if (!channel) return
-    channelRef.current = channel
-
-    channel.onmessage = (e) => {
-      if (e.data.type === 'STATE_CHANGED') {
-        const newGame = loadGameState(roomCode)
-        if (newGame) {
-          isFromBroadcastRef.current = true
-          setGame(newGame)
+    function handleStorage(e) {
+      if (e.key !== `hts_gamestate_${roomCode}`) return
+      if (!e.newValue) return
+      try {
+        const parsed = JSON.parse(e.newValue)
+        if (parsed) {
+          isFromStorageRef.current = true
+          setGame(parsed)
         }
-      }
+      } catch {}
     }
-
-    return () => { channel.close(); channelRef.current = null }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
   }, [roomCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Save to localStorage + notify other tabs whenever game state changes.
+  // Persist game state to localStorage after every local action.
+  // Skip when the update came from another tab (storage event) to avoid loops.
   useEffect(() => {
     if (!game || !roomCode) return
-    if (isFromBroadcastRef.current) { isFromBroadcastRef.current = false; return }
+    if (isFromStorageRef.current) { isFromStorageRef.current = false; return }
     saveGameState(roomCode, game)
-    channelRef.current?.postMessage({ type: 'STATE_CHANGED' })
   }, [game, roomCode])
 
   // These three effects MUST be declared before any conditional return (React hooks rules).
   // They use optional chaining so they're safe when game is null.
   useEffect(() => {
-    if (!game?.pendingChallenge) return undefined
-    setChallengeSecondsLeft(Math.ceil(CHALLENGE_WINDOW_MS / 1000))
-    const interval = window.setInterval(() => {
-      setChallengeSecondsLeft((prev) => Math.max(0, prev - 1))
-    }, 1000)
-    const timeout = window.setTimeout(() => {
+    if (!game?.challengeStartedAt) return undefined
+    const endTime = game.challengeStartedAt + CHALLENGE_WINDOW_MS
+    function tick() {
+      setChallengeSecondsLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)))
+    }
+    tick()
+    const interval = window.setInterval(tick, 200)
+    const delay = endTime - Date.now()
+    if (delay <= 0) {
+      window.clearInterval(interval)
       setGame((prev) => {
         if (!prev?.pendingChallenge) return prev
         const { game: nextGame, diceRoll } = passChallengeWindow(prev)
         if (diceRoll) setDisplayRoll(diceRoll)
         return nextGame
       })
-    }, CHALLENGE_WINDOW_MS)
+      return undefined
+    }
+    const timeout = window.setTimeout(() => {
+      window.clearInterval(interval)
+      setGame((prev) => {
+        if (!prev?.pendingChallenge) return prev
+        const { game: nextGame, diceRoll } = passChallengeWindow(prev)
+        if (diceRoll) setDisplayRoll(diceRoll)
+        return nextGame
+      })
+    }, delay)
     return () => { window.clearInterval(interval); window.clearTimeout(timeout) }
-  }, [game?.pendingChallenge]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [game?.challengeStartedAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!game?.pendingRoll) return undefined
-    setDisplayRoll(game.pendingRoll)
-    setModifierSecondsLeft(Math.ceil(MODIFIER_WINDOW_MS / 1000))
-    const interval = window.setInterval(() => {
-      setModifierSecondsLeft((prev) => Math.max(0, prev - 1))
-    }, 1000)
-    const timeout = window.setTimeout(() => {
+    if (!game?.modifierStartedAt) return undefined
+    if (game?.pendingRoll) setDisplayRoll(game.pendingRoll)
+    const endTime = game.modifierStartedAt + MODIFIER_WINDOW_MS
+    function tick() {
+      setModifierSecondsLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)))
+    }
+    tick()
+    const interval = window.setInterval(tick, 200)
+    const delay = endTime - Date.now()
+    if (delay <= 0) {
+      window.clearInterval(interval)
       setGame((prev) => {
         if (!prev?.pendingRoll) return prev
         const { game: nextGame, diceRoll } = passModifierPhaseWithResult(prev)
         if (diceRoll) setDisplayRoll(diceRoll)
         return nextGame
       })
-    }, MODIFIER_WINDOW_MS)
+      return undefined
+    }
+    const timeout = window.setTimeout(() => {
+      window.clearInterval(interval)
+      setGame((prev) => {
+        if (!prev?.pendingRoll) return prev
+        const { game: nextGame, diceRoll } = passModifierPhaseWithResult(prev)
+        if (diceRoll) setDisplayRoll(diceRoll)
+        return nextGame
+      })
+    }, delay)
     return () => { window.clearInterval(interval); window.clearTimeout(timeout) }
-  }, [game?.pendingRoll]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [game?.modifierStartedAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (game?.pendingRoll || !displayRoll) return undefined
@@ -198,6 +222,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     )
   }
 
+  const isMyTurn = mySeat === game.currentPlayerIndex
   const currentPlayer = game.players[game.currentPlayerIndex]
   const modifierPhase = isModifierPhaseActive(game)
   const challengePhase = isChallengeWindowActive(game)
@@ -242,17 +267,21 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     heroPlayChoicePhase ||
     heroFromHandPlayPhase ||
     itemSelectionPhase
-  const canPlay = game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId
+  // All action gates require it to be MY turn (mySeat === currentPlayerIndex)
+  const canPlay = isMyTurn && game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId
   const canDraw =
+    isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
     game.actionPoints >= DRAW_CARD_AP_COST &&
     canDrawFromMainDeck(game)
   const canRestock =
+    isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
     game.actionPoints >= RESTOCK_HAND_AP_COST
   const canAttackMonster =
+    isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
     game.actionPoints >= ATTACK_MONSTER_AP_COST
@@ -407,7 +436,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   }
 
   function handlePassChallenge() {
-    const { game: nextGame, diceRoll, error } = passChallengeWindow(game)
+    const { game: nextGame, diceRoll, error } = passChallengeWindow(game, mySeat)
     if (error) {
       window.alert(error)
       return
@@ -538,7 +567,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   }
 
   function handlePassModifier() {
-    const { game: nextGame, diceRoll } = passModifierPhaseWithResult(game)
+    const { game: nextGame, diceRoll } = passModifierPhaseWithResult(game, mySeat)
     setGame(nextGame)
     setModifierChoice(null)
     setModifierTargetChoice(null)
@@ -772,146 +801,170 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
       {challengePhase && !modifierPhase && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>{challengeAttacker?.name ?? currentPlayer.name}</strong> played{' '}
-            <strong>{stagedCard?.name ?? 'a card'}</strong>.{' '}
-            Any opponent may play a Challenge card — or{' '}
-            <strong>{challengeAttacker?.name ?? currentPlayer.name}</strong> may Pass.
-          </p>
-          <button
-            type="button"
-            className="game-actions__btn game-actions__btn--primary"
-            onClick={handlePassChallenge}
-          >
-            Pass (no challenge)
-          </button>
+          {mySeat === challengeAttackerIndex ? (
+            /* The player who played the card: just waits */
+            <p className="challenge-phase-bar__text">
+              You played <strong>{stagedCard?.name ?? 'a card'}</strong>.
+              Waiting for opponents to challenge or pass…
+            </p>
+          ) : (
+            /* All other players: can challenge or pass */
+            <>
+              <p className="challenge-phase-bar__text">
+                <strong>{challengeAttacker?.name ?? currentPlayer.name}</strong> played{' '}
+                <strong>{stagedCard?.name ?? 'a card'}</strong>.
+                Play a <strong>Challenge card</strong> to oppose, or Pass.
+                {(game.challengePassedBy ?? []).length > 0 && (
+                  <span className="status-warn">
+                    {' '}Passed: {(game.challengePassedBy ?? []).map((i) => game.players[i]?.name).join(', ')}
+                  </span>
+                )}
+              </p>
+              {!(game.challengePassedBy ?? []).includes(mySeat) && (
+                <button
+                  type="button"
+                  className="game-actions__btn game-actions__btn--primary"
+                  onClick={handlePassChallenge}
+                >
+                  Pass (no challenge)
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 
       {modifierPhase && (
         <div className="modifier-phase-bar">
+          {(game.modifierPassedBy ?? []).length > 0 && (
+            <span className="challenge-phase-bar__text">
+              Passed: {(game.modifierPassedBy ?? []).map((i) => game.players[i]?.name).join(', ')}
+            </span>
+          )}
           <button
             type="button"
             className="game-actions__btn game-actions__btn--primary"
             onClick={handlePassModifier}
+            disabled={(game.modifierPassedBy ?? []).includes(mySeat)}
           >
-            Pass
+            {(game.modifierPassedBy ?? []).includes(mySeat) ? 'Passed' : 'Pass'}
           </button>
         </div>
       )}
 
       {stagedCardPickPhase && stagedCardPick && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>
-              {game.players[stagedCardPick.sourcePlayerIndex]?.name}
-            </strong>
-            : choose 1 staged card from{' '}
-            <strong>{stagedCardPick.sourceLabel}</strong> to add to your hand.
-          </p>
-          <div className="card-row staged-card-row">
-            {stagedCardPick.stagedCards.map((card) => (
-              <button
-                key={card.instanceId}
-                type="button"
-                className="hand-card hand-card--playable hand-card--staged-pick"
-                disabled={
-                  game.currentPlayerIndex !== stagedCardPick.sourcePlayerIndex
-                }
-                onClick={() => handlePickStagedCard(card.instanceId)}
-              >
-                <CardDisplay card={card} faceUp={card.faceUp ?? true} />
-              </button>
-            ))}
-          </div>
+          {mySeat === stagedCardPick.sourcePlayerIndex ? (
+            <>
+              <p className="challenge-phase-bar__text">
+                Choose 1 staged card from <strong>{stagedCardPick.sourceLabel}</strong> to add to your hand.
+              </p>
+              <div className="card-row staged-card-row">
+                {stagedCardPick.stagedCards.map((card) => (
+                  <button
+                    key={card.instanceId}
+                    type="button"
+                    className="hand-card hand-card--playable hand-card--staged-pick"
+                    onClick={() => handlePickStagedCard(card.instanceId)}
+                  >
+                    <CardDisplay card={card} faceUp={card.faceUp ?? true} />
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{game.players[stagedCardPick.sourcePlayerIndex]?.name}</strong> to pick a staged card…
+            </p>
+          )}
         </div>
       )}
 
       {heroPlayChoicePhase && heroPlayChoice && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>
-              {game.players[heroPlayChoice.sourcePlayerIndex]?.name}
-            </strong>
-            : <strong>{heroPlayChoice.sourceLabel}</strong> lets you play{' '}
-            <strong>{heroPlayChoice.heroCard.name}</strong> immediately
-            (and trigger its skill), or keep it in your hand?
-          </p>
-          <div className="card-row staged-card-row">
-            <div className="hand-card">
-              <CardDisplay
-                card={heroPlayChoice.heroCard}
-                faceUp={heroPlayChoice.heroCard.faceUp ?? true}
-              />
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button
-              type="button"
-              className="game-actions__btn game-actions__btn--primary"
-              disabled={
-                game.currentPlayerIndex !== heroPlayChoice.sourcePlayerIndex
-              }
-              onClick={handleConfirmHeroPlayChoice}
-            >
-              Play immediately
-            </button>
-            <button
-              type="button"
-              className="game-actions__btn"
-              disabled={
-                game.currentPlayerIndex !== heroPlayChoice.sourcePlayerIndex
-              }
-              onClick={handleDeclineHeroPlayChoice}
-            >
-              Keep in hand
-            </button>
-          </div>
+          {mySeat === heroPlayChoice.sourcePlayerIndex ? (
+            <>
+              <p className="challenge-phase-bar__text">
+                <strong>{heroPlayChoice.sourceLabel}</strong>: Play{' '}
+                <strong>{heroPlayChoice.heroCard.name}</strong> immediately (and trigger its skill), or keep it in your hand?
+              </p>
+              <div className="card-row staged-card-row">
+                <div className="hand-card">
+                  <CardDisplay card={heroPlayChoice.heroCard} faceUp={heroPlayChoice.heroCard.faceUp ?? true} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button type="button" className="game-actions__btn game-actions__btn--primary" onClick={handleConfirmHeroPlayChoice}>
+                  Play immediately
+                </button>
+                <button type="button" className="game-actions__btn" onClick={handleDeclineHeroPlayChoice}>
+                  Keep in hand
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{game.players[heroPlayChoice.sourcePlayerIndex]?.name}</strong> to decide on <strong>{heroPlayChoice.heroCard.name}</strong>…
+            </p>
+          )}
         </div>
       )}
 
       {qiBearPhase && qiBearSel && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>Qi Bear</strong>: choose how many cards to discard (0–{qiBearSel.maxCount}),
-            then click that many heroes to destroy.
-            Selected: <strong>{qiBearSel.heroTargets.length}</strong> / {qiBearSel.count}
-          </p>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span>Discard count:</span>
-            {Array.from({ length: qiBearSel.maxCount + 1 }, (_, i) => (
+          {mySeat === qiBearSel.sourcePlayerIndex ? (
+            <>
+              <p className="challenge-phase-bar__text">
+                <strong>Qi Bear</strong>: choose how many cards to discard (0–{qiBearSel.maxCount}),
+                then click that many heroes to destroy.
+                Selected: <strong>{qiBearSel.heroTargets.length}</strong> / {qiBearSel.count}
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span>Discard count:</span>
+                {Array.from({ length: qiBearSel.maxCount + 1 }, (_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    className={`game-actions__btn${qiBearSel.count === i ? ' game-actions__btn--primary' : ''}`}
+                    onClick={() => handleSetQiBearCount(i)}
+                  >
+                    {i}
+                  </button>
+                ))}
+              </div>
               <button
-                key={i}
                 type="button"
-                className={`game-actions__btn${qiBearSel.count === i ? ' game-actions__btn--primary' : ''}`}
-                onClick={() => handleSetQiBearCount(i)}
+                className="game-actions__btn game-actions__btn--primary"
+                disabled={qiBearSel.heroTargets.length !== qiBearSel.count}
+                onClick={handleConfirmQiBearSelection}
               >
-                {i}
+                Confirm → Roll
               </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="game-actions__btn game-actions__btn--primary"
-            disabled={qiBearSel.heroTargets.length !== qiBearSel.count}
-            onClick={handleConfirmQiBearSelection}
-          >
-            Confirm → Roll
-          </button>
+            </>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{game.players[qiBearSel.sourcePlayerIndex]?.name}</strong> (Qi Bear selection)…
+            </p>
+          )}
         </div>
       )}
 
       {heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>
-            : Choose a hero to {heroTargetAction} — click a hero on any party below.
-          </p>
+          {mySeat === game.pendingEffectHeroTargetSelection.sourcePlayerIndex ? (
+            <p className="challenge-phase-bar__text">
+              <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>: Click a hero to <strong>{heroTargetAction}</strong>.
+            </p>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{game.players[game.pendingEffectHeroTargetSelection.sourcePlayerIndex]?.name}</strong> to pick a hero to {heroTargetAction}…
+            </p>
+          )}
         </div>
       )}
 
       <CardPullDialog
-        open={cardPullPhase && cardPull !== null}
+        open={cardPullPhase && cardPull !== null && cardPull.sourcePlayerIndex === mySeat}
         sourceLabel={cardPull?.sourceLabel ?? ''}
         targetPlayerName={
           cardPull !== null
@@ -936,80 +989,76 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
       {pendingDiscardPhase && pendingDiscard && discardingPlayer && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>{discardingPlayer.name}</strong>:
-            {pendingDiscard.kind === 'opponentEach' ? (
-              <>
-                {' '}
-                discard 1 card for{' '}
-                <strong>{pendingDiscard.sourceLabel}</strong> (staged, not to
-                discard pile yet). Click a card in your hand.
-              </>
-            ) : pendingDiscard.kind === 'opponentEachPile' ? (
-              <>
-                {' '}
-                discard 1 card for{' '}
-                <strong>{pendingDiscard.sourceLabel}</strong> (Fighter in your
-                party). Click a card in your hand.
-              </>
-            ) : pendingDiscard.optional ? (
-              <>
-                {' '}
-                discard up to <strong>{pendingDiscard.count}</strong> more card
-                {pendingDiscard.count === 1 ? '' : 's'} (from{' '}
-                <strong>{pendingDiscard.sourceLabel}</strong>). Click a card in
-                your hand, or Pass to stop.
-              </>
-            ) : (
-              <>
-                {' '}
-                discard <strong>{pendingDiscard.count}</strong> card
-                {pendingDiscard.count === 1 ? '' : 's'} (from{' '}
-                <strong>{pendingDiscard.sourceLabel}</strong>). Click a card in
-                your hand.
-              </>
-            )}
-          </p>
-          {pendingDiscard.optional &&
-            game.currentPlayerIndex === pendingDiscard.playerIndex && (
-              <button
-                type="button"
-                className="game-actions__btn game-actions__btn--primary"
-                onClick={handlePassPendingDiscard}
-              >
-                Pass (stop discarding)
-              </button>
-            )}
+          {mySeat === pendingDiscard.playerIndex ? (
+            <>
+              <p className="challenge-phase-bar__text">
+                {pendingDiscard.kind === 'opponentEach'
+                  ? <>Discard 1 card for <strong>{pendingDiscard.sourceLabel}</strong> (staged). Click a card in your hand.</>
+                  : pendingDiscard.kind === 'opponentEachPile'
+                  ? <>Discard 1 card for <strong>{pendingDiscard.sourceLabel}</strong>. Click a card in your hand.</>
+                  : pendingDiscard.optional
+                  ? <>Discard up to <strong>{pendingDiscard.count}</strong> more card{pendingDiscard.count === 1 ? '' : 's'} (from <strong>{pendingDiscard.sourceLabel}</strong>). Click a card below, or Pass.</>
+                  : <>Discard <strong>{pendingDiscard.count}</strong> card{pendingDiscard.count === 1 ? '' : 's'} (from <strong>{pendingDiscard.sourceLabel}</strong>). Click a card in your hand.</>
+                }
+              </p>
+              {pendingDiscard.optional && (
+                <button type="button" className="game-actions__btn game-actions__btn--primary" onClick={handlePassPendingDiscard}>
+                  Pass (stop discarding)
+                </button>
+              )}
+            </>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{discardingPlayer.name}</strong> to discard
+              {pendingDiscard.count > 1 ? ` (${pendingDiscard.count} cards)` : ''}…
+            </p>
+          )}
         </div>
       )}
 
       {pendingGivePhase && pendingGive && currentGiver && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>{currentGiver.name}</strong>: give 1 card to{' '}
-            <strong>{game.players[pendingGive.targetPlayerIndex]?.name ?? 'Player'}</strong>{' '}
-            (from <strong>{pendingGive.sourceLabel}</strong>). Click a card in your hand.
-          </p>
+          {mySeat === currentGiverIndex ? (
+            <p className="challenge-phase-bar__text">
+              Give 1 card to <strong>{game.players[pendingGive.targetPlayerIndex]?.name ?? 'Player'}</strong>{' '}
+              (from <strong>{pendingGive.sourceLabel}</strong>). Click a card in your hand.
+            </p>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{currentGiver.name}</strong> to give a card to{' '}
+              <strong>{game.players[pendingGive.targetPlayerIndex]?.name ?? 'Player'}</strong>…
+            </p>
+          )}
         </div>
       )}
 
       {heroFromHandPlayPhase && heroFromHandPlay && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>{game.players[heroFromHandPlay.sourcePlayerIndex]?.name}</strong>:
-            choose a <strong>Hero</strong> card from your hand to play immediately
-            (from <strong>{heroFromHandPlay.sourceLabel}</strong>).
-          </p>
+          {mySeat === heroFromHandPlay.sourcePlayerIndex ? (
+            <p className="challenge-phase-bar__text">
+              Choose a <strong>Hero</strong> card from your hand to play immediately
+              (from <strong>{heroFromHandPlay.sourceLabel}</strong>).
+            </p>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{game.players[heroFromHandPlay.sourcePlayerIndex]?.name}</strong> to play a Hero from hand…
+            </p>
+          )}
         </div>
       )}
 
       {itemSelectionPhase && itemSelection && (
         <div className="modifier-phase-bar challenge-phase-bar">
-          <p className="challenge-phase-bar__text">
-            <strong>{game.players[itemSelection.sourcePlayerIndex]?.name}</strong>:
-            click an equipped item on any party to return it to its owner's hand
-            (<strong>{itemSelection.sourceLabel}</strong>).
-          </p>
+          {mySeat === itemSelection.sourcePlayerIndex ? (
+            <p className="challenge-phase-bar__text">
+              Click an equipped item on any party to return it to its owner's hand
+              (<strong>{itemSelection.sourceLabel}</strong>).
+            </p>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{game.players[itemSelection.sourcePlayerIndex]?.name}</strong> to pick an item to return…
+            </p>
+          )}
         </div>
       )}
 
@@ -1038,7 +1087,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       />
 
       <EffectTargetDialog
-        open={targetSelectionPhase && effectSel !== null}
+        open={targetSelectionPhase && effectSel !== null && effectSel.sourcePlayerIndex === mySeat}
         heroName={effectSel?.heroName ?? ''}
         sourcePlayerName={effectSourcePlayer?.name ?? ''}
         options={targetOptions}
@@ -1051,11 +1100,20 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
           .map((player, playerIndex) => ({ player, playerIndex }))
           .filter(({ playerIndex }) => playerIndex !== mySeat)
           .map(({ player, playerIndex }) => {
-            const partyClickableForSelection = heroSelectionPhase && isPartyClickableForSelection(game, playerIndex)
-            const partyClickableForHeroTarget = heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, playerIndex)
+            // Only MY interactions are enabled — check mySeat is the source player
+            const iAmSelecting = heroSelectionPhase && heroSelection?.sourcePlayerIndex === mySeat
+            const partyClickableForSelection = iAmSelecting && isPartyClickableForSelection(game, playerIndex)
+            const iAmTargeting = heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection?.sourcePlayerIndex === mySeat
+            const partyClickableForHeroTarget = iAmTargeting && isPartyClickableForHeroTargetSelection(game, playerIndex)
             const selectionMode = partyClickableForSelection
               ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
               : null
+            // QiBear: only the source player can mark heroes to destroy on opponent parties
+            const iAmQiBear = qiBearPhase && qiBearSel?.sourcePlayerIndex === mySeat
+            // Item equip cursed: I (mySeat) equip a cursed item on an opponent hero
+            const canEquipCursedHere = itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed
+            // Item selection (Winds of Change): only source player clicks items
+            const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat
             return (
               <CompactPlayerPanel
                 key={player.id}
@@ -1064,17 +1122,13 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
                 onHeroSkillClick={(hero) => handleHeroSkillClick(hero, playerIndex)}
                 heroSkillClickable={partyClickableForSelection || partyClickableForHeroTarget}
                 allowHeroClickWhenSkillUsed={partyClickableForSelection || partyClickableForHeroTarget}
-                onHeroEquipClick={
-                  itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed && playerIndex !== mySeat
-                    ? handleHeroEquipClick
-                    : undefined
-                }
-                heroEquipSelectable={itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed && playerIndex !== mySeat}
+                onHeroEquipClick={canEquipCursedHere ? handleHeroEquipClick : undefined}
+                heroEquipSelectable={canEquipCursedHere}
                 selectionMode={selectionMode}
-                pendingDestroyMode={qiBearPhase || partyClickableForHeroTarget}
+                pendingDestroyMode={iAmQiBear || partyClickableForHeroTarget}
                 pendingDestroyIds={game.pendingDestroyTargets}
-                onItemClick={itemSelectionPhase ? handleItemClick : undefined}
-                itemsSelectable={itemSelectionPhase}
+                onItemClick={iAmItemSelecting ? handleItemClick : undefined}
+                itemsSelectable={iAmItemSelecting}
               />
             )
           })
@@ -1193,7 +1247,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               type="button"
               className="game-actions__btn game-actions__btn--primary"
               onClick={handleEndTurn}
-              disabled={interruptPhase}
+              disabled={interruptPhase || !isMyTurn}
             >
               End turn
             </button>
@@ -1279,14 +1333,15 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
                       : heroTargetSelectionPhase ? false
                       : targetSelectionPhase ? false
                       : modifierPhase ? playable
-                      : challengePhase ? playable
-                      : mySeat === game.currentPlayerIndex && (itemEquipInstanceId ? itemEquipInstanceId === card.instanceId : canPlay && playable)
+                      // During challenge phase: only non-attackers can play challenge cards
+                      : challengePhase ? (mySeat !== challengeAttackerIndex && playable)
+                      : isMyTurn && (itemEquipInstanceId ? itemEquipInstanceId === card.instanceId : canPlay && playable)
                     const isSelectedItem = itemEquipInstanceId === card.instanceId
                     return (
                       <button
                         key={card.instanceId}
                         type="button"
-                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelectedItem ? ' hand-card--selected' : ''}`}
+                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && mySeat !== challengeAttackerIndex && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelectedItem ? ' hand-card--selected' : ''}`}
                         onClick={() => {
                           if (!pendingDiscardPhase && itemEquipInstanceId && card.instanceId === itemEquipInstanceId) {
                             setItemEquipInstanceId(null); setItemEquipIsCursed(false); return

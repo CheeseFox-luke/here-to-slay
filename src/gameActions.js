@@ -742,6 +742,8 @@ function resolveStagedPlay(game, staged) {
       pendingEffectTargetSelection,
       pendingEffectHeroTargetSelection,
       pendingQiBearSelection,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     diceRoll: pendingRoll,
     error: null,
@@ -837,6 +839,8 @@ function beginStagedPlay(game, instanceId, itemSlotIndex, targetPlayerIndex) {
       players,
       actionPoints: game.actionPoints - 1,
       pendingChallenge: { stagedPlay },
+      challengePassedBy: [],
+      challengeStartedAt: Date.now(),
     },
     error: null,
   }
@@ -957,13 +961,28 @@ export function resolveWindsOfChange(game, heroInstanceId, itemInstanceId) {
 /**
  * @param {GameState} game
  */
-export function passChallengeWindow(game) {
+export function passChallengeWindow(game, playerIndex = null) {
   if (!game.pendingChallenge) {
     return { game, diceRoll: null }
   }
 
+  const attackerIndex = game.pendingChallenge.stagedPlay.attackerIndex
+
+  if (playerIndex !== null) {
+    const passedBy = [...(game.challengePassedBy ?? []), playerIndex]
+    const nonAttackers = game.players.map((_, i) => i).filter((i) => i !== attackerIndex)
+    const allPassed = nonAttackers.every((i) => passedBy.includes(i))
+
+    if (!allPassed) {
+      return {
+        game: { ...game, challengePassedBy: passedBy },
+        diceRoll: null,
+      }
+    }
+  }
+
   const staged = game.pendingChallenge.stagedPlay
-  const cleared = { ...game, pendingChallenge: null }
+  const cleared = { ...game, pendingChallenge: null, challengePassedBy: [], challengeStartedAt: null }
   return resolveStagedPlay(cleared, staged)
 }
 
@@ -1021,7 +1040,11 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
       players,
       discardPile,
       pendingChallenge: null,
+      challengePassedBy: [],
+      challengeStartedAt: null,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
     error: null,
@@ -1192,6 +1215,8 @@ export function triggerHeroSkill(game, heroInstanceId) {
       players,
       actionPoints: game.actionPoints - 1,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     diceRoll: pendingRoll,
   }
@@ -1238,6 +1263,8 @@ export function attackMonster(game, monsterInstanceId) {
       ...game,
       actionPoints: game.actionPoints - ATTACK_MONSTER_AP_COST,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     diceRoll: pendingRoll,
   }
@@ -1323,6 +1350,7 @@ export function playModifierOnPendingRoll(
       players,
       discardPile,
       pendingRoll,
+      modifierPassedBy: [],
     },
     pendingRoll,
   }
@@ -1386,21 +1414,36 @@ export function passModifierPhase(game) {
 /**
  * @param {GameState} game
  */
-export function passModifierPhaseWithResult(game) {
+export function passModifierPhaseWithResult(game, playerIndex = null) {
   if (!game.pendingRoll) {
     return { game, diceRoll: null, challengeSuccess: false }
   }
 
-  if (game.pendingRoll.rollType === 'challenge') {
-    return finalizeChallenge(game)
+  if (playerIndex !== null) {
+    const passedBy = [...(game.modifierPassedBy ?? []), playerIndex]
+    const allPassed = game.players.every((_, i) => passedBy.includes(i))
+
+    if (!allPassed) {
+      return {
+        game: { ...game, modifierPassedBy: passedBy },
+        diceRoll: null,
+        challengeSuccess: false,
+      }
+    }
   }
 
-  if (game.pendingRoll.rollType === 'hero') {
-    return { ...finalizeHeroRoll(game), challengeSuccess: false }
+  const cleared = { ...game, modifierPassedBy: [] }
+
+  if (cleared.pendingRoll.rollType === 'challenge') {
+    return finalizeChallenge(cleared)
+  }
+
+  if (cleared.pendingRoll.rollType === 'hero') {
+    return { ...finalizeHeroRoll(cleared), challengeSuccess: false }
   }
 
   return {
-    game: { ...game, pendingRoll: null },
+    game: { ...cleared, pendingRoll: null },
     diceRoll: null,
     challengeSuccess: false,
   }
@@ -1447,6 +1490,8 @@ export function selectEffectTarget(game, targetPlayerIndex) {
       ...game,
       pendingEffectTargetSelection: null,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
@@ -1582,6 +1627,8 @@ export function selectEffectHeroTarget(game, heroInstanceId) {
       pendingEffectHeroTargetSelection: null,
       pendingDestroyTargets: [heroInstanceId],
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
@@ -1684,6 +1731,8 @@ export function confirmQiBearSelection(game, sourcePlayerIndex) {
       pendingQiBearSelection: null,
       pendingRoll,
       pendingDestroyTargets: sel.heroTargets,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
@@ -2244,6 +2293,10 @@ export function endTurn(game) {
     pendingDestroyTargets: [],
     globalRollBonus: 0,
     pendingItemSelection: null,
+    challengePassedBy: [],
+    modifierPassedBy: [],
+    challengeStartedAt: null,
+    modifierStartedAt: null,
   }
 }
 

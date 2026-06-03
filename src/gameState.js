@@ -377,6 +377,10 @@ export const initialGameState = {
   pendingDestroyTargets: [],
   antiChallenge: false,
   antiModifier: false,
+  challengePassedBy: [],
+  modifierPassedBy: [],
+  challengeStartedAt: null,
+  modifierStartedAt: null,
 }
 
 export const RESTOCK_HAND_AP_COST = 3
@@ -446,5 +450,9 @@ export function initGame(playerCount) {
     pendingDestroyTargets: [],
     antiChallenge: false,
     antiModifier: false,
+    challengePassedBy: [],
+    modifierPassedBy: [],
+    challengeStartedAt: null,
+    modifierStartedAt: null,
   }
 }
