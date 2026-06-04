@@ -370,6 +370,7 @@ export function partyHasHero(partySlots) {
  * @property {PendingWigglesRoll | null} [pendingWigglesRoll]
  * @property {number | null} [partyAntiSteal] - playerIndex whose entire party cannot be stolen; cleared at start of that player's next turn.
  * @property {number | null} [partyAntiDestroy] - playerIndex whose entire party cannot be destroyed; cleared at start of that player's next turn.
+ * @property {number | null} [winner] - playerIndex of the winner; null while game is ongoing.
  */
 
 /**
@@ -439,6 +440,7 @@ export const initialGameState = {
   modifierStartedAt: null,
   partyAntiSteal: null,
   partyAntiDestroy: null,
+  winner: null,
 }
 
 export const RESTOCK_HAND_AP_COST = 3
@@ -512,5 +514,6 @@ export function initGame(playerCount) {
     modifierPassedBy: [],
     challengeStartedAt: null,
     modifierStartedAt: null,
+    winner: null,
   }
 }

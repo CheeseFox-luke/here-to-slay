@@ -293,22 +293,26 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     heroFromHandPlayPhase ||
     itemSelectionPhase
   // All action gates require it to be MY turn (mySeat === currentPlayerIndex)
-  const canPlay = isMyTurn && game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId
+  const gameOver = game.winner != null
+  const canPlay = isMyTurn && game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId && !gameOver
   const canDraw =
     isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
+    !gameOver &&
     game.actionPoints >= DRAW_CARD_AP_COST &&
     canDrawFromMainDeck(game)
   const canRestock =
     isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
+    !gameOver &&
     game.actionPoints >= RESTOCK_HAND_AP_COST
   const canAttackMonster =
     isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
+    !gameOver &&
     game.actionPoints >= ATTACK_MONSTER_AP_COST
   const topDiscard = game.discardPile[game.discardPile.length - 1]
   const challengeAttackerIndex = getChallengeAttackerIndex(game)
@@ -868,6 +872,19 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
   return (
     <div className="game-layout">
+      {/* Victory overlay */}
+      {game.winner != null && (
+        <div className="victory-overlay">
+          <div className="victory-modal">
+            <div className="victory-trophy">🏆</div>
+            <h1 className="victory-title">
+              {game.players[game.winner]?.name ?? `Player ${game.winner + 1}`} Wins!
+            </h1>
+            <p className="victory-subtitle">The adventure is over.</p>
+          </div>
+        </div>
+      )}
+
       {/* Phase/status overlays */}
       <RollFeedback
         pendingRoll={rollToShow}
@@ -1442,7 +1459,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               type="button"
               className="game-actions__btn game-actions__btn--primary"
               onClick={handleEndTurn}
-              disabled={interruptPhase || !isMyTurn}
+              disabled={interruptPhase || !isMyTurn || gameOver}
             >
               End turn
             </button>

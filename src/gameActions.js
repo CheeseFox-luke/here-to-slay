@@ -1,4 +1,4 @@
-import { CARD_TYPES } from './data/cardUtils.js'
+import { CARD_TYPES, HERO_CLASSES } from './data/cardUtils.js'
 import {
   getModifierEffect,
   resolveModifierDelta,
@@ -1697,6 +1697,84 @@ function finalizeHeroRoll(game) {
 }
 
 /**
+ * Resolve a monster attack roll after the modifier phase completes.
+ * - sum >= successAtOrAbove (8): monster slain → move to player's slainMonsters,
+ *   draw next monster from deck to fill the gap.
+ * - sum <= failAtOrBelow (5): failure → player must sacrifice one of their own heroes.
+ * - otherwise: nothing happens.
+ *
+ * @param {GameState} game
+ * @returns {{ game: GameState, monsterSlain?: boolean }}
+ */
+function finalizeMonsterRoll(game) {
+  const roll = game.pendingRoll
+  if (!roll || roll.rollType !== 'monster') return { game }
+
+  const { currentSum, rollingPlayerIndex, targetMonsterInstanceId } = roll
+  const failAt = roll.failAtOrBelow ?? 5
+  const succeedAt = roll.successAtOrAbove ?? 8
+
+  const cleared = { ...game, pendingRoll: null }
+
+  if (currentSum >= succeedAt) {
+    // ── Success: slay the monster ──────────────────────────────────────────
+    const monster = cleared.activeMonsters.find(
+      (m) => m.instanceId === targetMonsterInstanceId,
+    )
+    if (!monster) return { game: cleared }
+
+    const newActiveMonsters = cleared.activeMonsters.filter(
+      (m) => m.instanceId !== targetMonsterInstanceId,
+    )
+
+    // Draw replacement from monster deck (if any remain)
+    const [nextMonster, ...remainingDeck] = cleared.monsterDeck
+    const refilled = nextMonster
+      ? [...newActiveMonsters, withFaceUp(nextMonster)]
+      : newActiveMonsters
+
+    // Add to the slaying player's slainMonsters
+    const players = cleared.players.map((p, i) =>
+      i === rollingPlayerIndex
+        ? { ...p, slainMonsters: [...p.slainMonsters, withFaceUp(monster)] }
+        : p,
+    )
+
+    return {
+      game: {
+        ...cleared,
+        players,
+        activeMonsters: refilled,
+        monsterDeck: nextMonster ? remainingDeck : cleared.monsterDeck,
+      },
+      monsterSlain: true,
+    }
+  }
+
+  if (currentSum <= failAt) {
+    // ── Failure: player must sacrifice a hero ──────────────────────────────
+    const player = cleared.players[rollingPlayerIndex]
+    const hasHero = player?.partySlots.some((s) => s !== null)
+    if (!hasHero) return { game: cleared }
+
+    return {
+      game: {
+        ...cleared,
+        pendingHeroSelection: {
+          sourcePlayerIndex: rollingPlayerIndex,
+          scope: 'own',
+          action: 'sacrifice',
+          sourceLabel: 'Monster Attack Failed',
+        },
+      },
+    }
+  }
+
+  // Neutral — nothing happens
+  return { game: cleared }
+}
+
+/**
  * @param {GameState} game
  */
 export function passModifierPhase(game) {
@@ -1710,6 +1788,10 @@ export function passModifierPhase(game) {
 
   if (game.pendingRoll.rollType === 'hero') {
     return finalizeHeroRoll(game).game
+  }
+
+  if (game.pendingRoll.rollType === 'monster') {
+    return finalizeMonsterRoll(game).game
   }
 
   return { ...game, pendingRoll: null }
@@ -1744,6 +1826,11 @@ export function passModifierPhaseWithResult(game, playerIndex = null) {
 
   if (cleared.pendingRoll.rollType === 'hero') {
     return { ...finalizeHeroRoll(cleared), challengeSuccess: false }
+  }
+
+  if (cleared.pendingRoll.rollType === 'monster') {
+    const { game: afterMonster, monsterSlain } = finalizeMonsterRoll(cleared)
+    return { game: afterMonster, diceRoll: null, challengeSuccess: false, monsterSlain }
   }
 
   return {
@@ -2636,10 +2723,37 @@ export function drawCard(game) {
   }
 }
 
+const ALL_HERO_CLASSES = Object.values(HERO_CLASSES)
+
+/**
+ * Check if a player has met either win condition.
+ * Returns the winning playerIndex, or -1 if no winner yet.
+ * @param {GameState} game
+ * @param {number} playerIndex
+ */
+function checkWinCondition(game, playerIndex) {
+  const player = game.players[playerIndex]
+  if (!player) return false
+
+  // Condition 1: slain 3+ monsters
+  if (player.slainMonsters.length >= 3) return true
+
+  // Condition 2: at least one hero of every class in party
+  const classesInParty = new Set(
+    player.partySlots
+      .filter((s) => s !== null)
+      .map((s) => s.hero.class),
+  )
+  if (ALL_HERO_CLASSES.every((cls) => classesInParty.has(cls))) return true
+
+  return false
+}
+
 /**
  * @param {GameState} game
  */
 export function endTurn(game) {
+  if (game.winner != null) return game
   const nextIndex = (game.currentPlayerIndex + 1) % game.players.length
 
   const players = game.players.map((p, index) => ({
@@ -2683,6 +2797,7 @@ export function endTurn(game) {
     // Party protections expire when it becomes that player's turn again
     partyAntiSteal: game.partyAntiSteal === nextIndex ? null : (game.partyAntiSteal ?? null),
     partyAntiDestroy: game.partyAntiDestroy === nextIndex ? null : (game.partyAntiDestroy ?? null),
+    winner: checkWinCondition(game, game.currentPlayerIndex) ? game.currentPlayerIndex : null,
   }
 }
 
