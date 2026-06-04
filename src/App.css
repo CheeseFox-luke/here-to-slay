@@ -265,6 +265,8 @@
   height: 100dvh;
   overflow: hidden;
   position: relative;
+  /* 与 .game-my-section max-height 同步，供操作台/后续骰子台定位 */
+  --game-my-section-max-h: 45vh;
 }
 
 /* Opponents row — top */
@@ -334,29 +336,17 @@
   margin: 4px 0 0;
 }
 
-/* My section — bottom */
+/* My section — bottom（手牌/己方队伍） */
 .game-my-section {
   flex-shrink: 0;
   border-top: 2px solid var(--accent-border);
   background: var(--bg);
   display: flex;
   flex-direction: column;
-  max-height: 45vh;
-}
-
-.my-section__header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.my-section__status {
-  flex: 1;
-  font-size: 0.9rem;
-  margin: 0;
+  max-height: var(--game-my-section-max-h);
+  position: relative;
+  z-index: 12;
+  overflow: visible;
 }
 
 .status-warn {
@@ -364,10 +354,73 @@
   font-size: 0.85rem;
 }
 
-.my-section__actions {
+/**
+ * 操作台：底边对齐 game-my-section 顶边（贴手牌区），向上浮出透明叠在牌桌底缘。
+ * 不用固定 45vh，避免手牌区实际较矮时出现大空隙。
+ */
+.action-console {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 20;
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
+  padding: 6px 12px 8px;
+  background: transparent;
+  border: none;
+  pointer-events: none;
+}
+
+.action-console__status,
+.action-console__toolbar,
+.action-console__actions-main,
+.action-console__actions-debug,
+.action-console button {
+  pointer-events: auto;
+}
+
+.action-console__status {
+  width: 100%;
+  font-size: 0.9rem;
+  margin: 0;
+  text-align: center;
+  color: var(--text-h);
+  text-shadow:
+    0 0 8px var(--bg),
+    0 1px 2px var(--bg),
+    0 0 12px var(--bg);
+}
+
+.action-console__toolbar {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+}
+
+.action-console__actions-main {
+  display: flex;
   flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: calc(100% - 7rem);
+}
+
+.action-console__actions-debug {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.game-actions__btn--placeholder {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .my-section__board {

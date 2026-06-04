@@ -1411,10 +1411,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
       {/* Bottom: my section */}
       <div className="game-my-section">
-
-        {/* Status + action buttons */}
-        <div className="my-section__header">
-          <p className="my-section__status">
+        {/* 操作台：锚在己方区顶边，贴手牌区；透明浮在牌桌底缘（需求 2/3.5：action-console） */}
+        <div className="action-console" role="toolbar" aria-label="Actions">
+          <p className="action-console__status">
             Turn: <strong>{currentPlayer.name}</strong> · AP: <strong>{game.actionPoints}</strong>/3
             {itemEquipInstanceId && (
               <span className="status-warn">
@@ -1436,40 +1435,60 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               <span className="status-warn"> — Discard {pendingDiscard?.count}</span>
             )}
           </p>
-          <div className="my-section__actions">
-            <button
-              type="button"
-              className="game-actions__btn"
-              onClick={handleDrawCard}
-              disabled={!canDraw}
-              title={`Costs ${DRAW_CARD_AP_COST} AP`}
-            >
-              Draw ({DRAW_CARD_AP_COST} AP)
-            </button>
-            <button
-              type="button"
-              className="game-actions__btn"
-              onClick={handleRestockHand}
-              disabled={!canRestock}
-              title={`Costs ${RESTOCK_HAND_AP_COST} AP`}
-            >
-              {RESTOCK_HAND_ACTION_NAME} ({RESTOCK_HAND_AP_COST} AP)
-            </button>
-            <button
-              type="button"
-              className="game-actions__btn game-actions__btn--primary"
-              onClick={handleEndTurn}
-              disabled={interruptPhase || !isMyTurn || gameOver}
-            >
-              End turn
-            </button>
-            <button
-              type="button"
-              className={`game-actions__btn debug-toggle${debugMode ? ' debug-toggle--on' : ''}`}
-              onClick={handleToggleDebugMode}
-            >
-              Debug {debugMode ? 'ON' : 'OFF'}
-            </button>
+          <div className="action-console__toolbar">
+            <div className="action-console__actions-main">
+              <button
+                type="button"
+                className="game-actions__btn"
+                onClick={handleDrawCard}
+                disabled={!canDraw}
+                title={`Costs ${DRAW_CARD_AP_COST} AP`}
+              >
+                Draw ({DRAW_CARD_AP_COST} AP)
+              </button>
+              <button
+                type="button"
+                className="game-actions__btn game-actions__btn--placeholder"
+                disabled
+                title="Coming soon (req 5)"
+              >
+                Play ({DRAW_CARD_AP_COST} AP)
+              </button>
+              <button
+                type="button"
+                className="game-actions__btn game-actions__btn--placeholder"
+                disabled
+                title="Coming soon"
+              >
+                Slay ({ATTACK_MONSTER_AP_COST} AP)
+              </button>
+              <button
+                type="button"
+                className="game-actions__btn"
+                onClick={handleRestockHand}
+                disabled={!canRestock}
+                title={`Costs ${RESTOCK_HAND_AP_COST} AP`}
+              >
+                {RESTOCK_HAND_ACTION_NAME} ({RESTOCK_HAND_AP_COST} AP)
+              </button>
+              <button
+                type="button"
+                className="game-actions__btn game-actions__btn--primary"
+                onClick={handleEndTurn}
+                disabled={interruptPhase || !isMyTurn || gameOver}
+              >
+                End turn
+              </button>
+            </div>
+            <div className="action-console__actions-debug">
+              <button
+                type="button"
+                className={`game-actions__btn debug-toggle${debugMode ? ' debug-toggle--on' : ''}`}
+                onClick={handleToggleDebugMode}
+              >
+                Debug {debugMode ? 'ON' : 'OFF'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1513,26 +1532,6 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
           {/* My hand */}
           <div className="my-section__hand-area">
-            <h3 className="hand-heading">Hand</h3>
-            <p className="game-section__hint">
-              {heroSelectionPhase && heroSelection
-                ? mySeat === heroSelection.sourcePlayerIndex
-                  ? `Pick a hero to ${heroSelection.action}.`
-                  : `Waiting for ${game.players[heroSelection.sourcePlayerIndex]?.name} to pick a hero.`
-                : pendingDiscardPhase
-                  ? mySeat === pendingDiscard.playerIndex
-                    ? `Discard ${pendingDiscard.count} card${pendingDiscard.count === 1 ? '' : 's'}: click below.`
-                    : 'Waiting for opponent to discard.'
-                  : modifierPhase
-                    ? 'Any player: play Modifiers, or Pass.'
-                    : challengePhase
-                      ? mySeat !== challengeAttackerIndex
-                        ? 'Play a Challenge card, or wait.'
-                        : 'Waiting for opponents — or Pass above.'
-                      : mySeat === game.currentPlayerIndex
-                        ? 'Hero/Magic (1 AP). Item: click item then hero. Draw (1 AP). Restock (3 AP).'
-                        : 'Waiting for your turn.'}
-            </p>
             <div className="card-row hand-row">
               {game.players[mySeat].hand.length === 0
                 ? <p className="hand-empty">Empty hand</p>

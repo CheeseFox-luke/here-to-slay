@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import CardHoverPreview from './CardHoverPreview.jsx'
 import './CardDisplay.css'
 
-const HOVER_DELAY_MS = 500
-
 /**
+ * 卡面展示 + 悬停放大预览（需求 0：无延迟，mouseenter 即显示 CardHoverPreview）。
+ *
  * @param {{
  *   card: {
  *     id: string
@@ -22,32 +22,20 @@ function CardDisplay({ card, faceUp = true }) {
   const [hover, setHover] = useState(
     /** @type {{ x: number, y: number } | null} */ (null),
   )
-  const timerRef = useRef(/** @type {number | null} */ (null))
-  const pendingPosRef = useRef(/** @type {{ x: number, y: number } | null} */ (null))
 
   function handleMouseEnter(e) {
     if (!canPreview) return
-    pendingPosRef.current = { x: e.clientX, y: e.clientY }
-    timerRef.current = window.setTimeout(() => {
-      setHover(pendingPosRef.current)
-    }, HOVER_DELAY_MS)
+    setHover({ x: e.clientX, y: e.clientY })
   }
 
   function handleMouseMove(e) {
     if (!canPreview) return
-    pendingPosRef.current = { x: e.clientX, y: e.clientY }
-    // Update position live only once the preview is already visible
-    if (hover) {
-      setHover({ x: e.clientX, y: e.clientY })
-    }
+    setHover((prev) =>
+      prev ? { x: e.clientX, y: e.clientY } : null,
+    )
   }
 
   function handleMouseLeave() {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-    pendingPosRef.current = null
     setHover(null)
   }
 
