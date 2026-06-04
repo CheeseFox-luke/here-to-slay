@@ -1,4 +1,4 @@
-import { CARD_TYPES } from './data/cardUtils.js'
+import { CARD_TYPES, HERO_CLASSES } from './data/cardUtils.js'
 import {
   getModifierEffect,
   resolveModifierDelta,
@@ -742,6 +742,8 @@ function resolveStagedPlay(game, staged) {
       pendingEffectTargetSelection,
       pendingEffectHeroTargetSelection,
       pendingQiBearSelection,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     diceRoll: pendingRoll,
     error: null,
@@ -837,6 +839,8 @@ function beginStagedPlay(game, instanceId, itemSlotIndex, targetPlayerIndex) {
       players,
       actionPoints: game.actionPoints - 1,
       pendingChallenge: { stagedPlay },
+      challengePassedBy: [],
+      challengeStartedAt: Date.now(),
     },
     error: null,
   }
@@ -955,15 +959,333 @@ export function resolveWindsOfChange(game, heroInstanceId, itemInstanceId) {
 }
 
 /**
+ * Holy Curselifter: return a cursed item from one of the source player's own party heroes to their hand.
+ * @param {GameState} game
+ * @param {string} heroInstanceId
+ * @param {string} itemInstanceId
+ */
+export function resolveHolyCurselifter(game, heroInstanceId, itemInstanceId) {
+  const sel = game.pendingItemSelection
+  if (!sel) return { game, error: 'No item selection pending.' }
+
+  const sourcePlayer = game.players[sel.sourcePlayerIndex]
+  const slotIndex = sourcePlayer?.partySlots.findIndex((s) => s?.hero.instanceId === heroInstanceId) ?? -1
+  if (slotIndex === -1) return { game, error: 'Hero not found in your party.' }
+
+  const slot = sourcePlayer.partySlots[slotIndex]
+  const item = slot.items.find((it) => it.instanceId === itemInstanceId)
+  if (!item) return { game, error: 'Item not found on that hero.' }
+  if (item.type !== 'CursedItem') return { game, error: 'That item is not a cursed item.' }
+
+  const newItems = slot.items.filter((it) => it.instanceId !== itemInstanceId)
+  const newSlots = sourcePlayer.partySlots.map((s, i) =>
+    i === slotIndex ? { ...s, items: newItems } : s,
+  )
+  const returnedItem = { ...item, faceUp: false }
+  const players = game.players.map((p, i) =>
+    i === sel.sourcePlayerIndex
+      ? { ...p, partySlots: newSlots, hand: [...p.hand, returnedItem] }
+      : p,
+  )
+  return { game: { ...game, players, pendingItemSelection: null } }
+}
+
+/**
+ * Pass (no choose) for item selection phases that allow it (e.g. Holy Curselifter).
  * @param {GameState} game
  */
-export function passChallengeWindow(game) {
+export function passItemSelection(game) {
+  if (!game.pendingItemSelection) return { game, error: 'No item selection pending.' }
+  return { game: { ...game, pendingItemSelection: null } }
+}
+
+// ─── Bullseye (055) ──────────────────────────────────────────────────────────
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingTopDeckPickActive(game) {
+  return (game.pendingTopDeckPick ?? null) !== null
+}
+
+/**
+ * Resolve a pick step for Bullseye.
+ * Phase 'pick': player picks 1 card to keep (goes to hand); if 2 remain → phase 'order'.
+ * Phase 'order': player picks which of the 2 remaining goes on top; the other goes second.
+ * @param {GameState} game
+ * @param {string} instanceId
+ */
+export function resolveTopDeckPick(game, instanceId) {
+  const pending = game.pendingTopDeckPick
+  if (!pending) return { game, error: 'No top-deck pick pending.' }
+
+  const cardIndex = pending.cards.findIndex((c) => c.instanceId === instanceId)
+  if (cardIndex === -1) return { game, error: 'Card not found in top-deck selection.' }
+
+  const picked = pending.cards[cardIndex]
+  const rest = pending.cards.filter((_, i) => i !== cardIndex)
+
+  if (pending.phase === 'pick') {
+    const players = game.players.map((p, i) =>
+      i === pending.sourcePlayerIndex
+        ? { ...p, hand: [...p.hand, { ...picked, faceUp: true }] }
+        : p,
+    )
+    if (rest.length === 0) {
+      return { game: { ...game, players, pendingTopDeckPick: null } }
+    }
+    if (rest.length === 1) {
+      // Only 1 card left — put it back on top, no ordering needed
+      return {
+        game: {
+          ...game,
+          players,
+          mainDeck: [{ ...rest[0], faceUp: false }, ...game.mainDeck],
+          pendingTopDeckPick: null,
+        },
+      }
+    }
+    // 2 remain — move to ordering phase
+    return {
+      game: {
+        ...game,
+        players,
+        pendingTopDeckPick: { ...pending, cards: rest, phase: 'order' },
+      },
+    }
+  }
+
+  // Phase 'order': picked card goes on top, the other goes second
+  const other = rest[0]
+  return {
+    game: {
+      ...game,
+      mainDeck: [
+        { ...picked, faceUp: false },
+        { ...other, faceUp: false },
+        ...game.mainDeck,
+      ],
+      pendingTopDeckPick: null,
+    },
+  }
+}
+
+// ─── Quick Draw (056) / Hook (057) ───────────────────────────────────────────
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingBonusItemPlayActive(game) {
+  return (game.pendingBonusItemPlay ?? null) !== null
+}
+
+/**
+ * Player picks an item from their hand to equip as a bonus (no AP cost).
+ * Moves directly to a hero in their own party (for ITEM) or an opponent hero (for CURSED_ITEM).
+ * After equipping, draws `drawAfter` cards.
+ * @param {GameState} game
+ * @param {string} itemInstanceId
+ * @param {number} heroOwnerIndex - player who owns the target hero
+ * @param {number} slotIndex - party slot to equip to
+ */
+export function resolveBonusItemPlay(game, itemInstanceId, heroOwnerIndex, slotIndex) {
+  const pending = game.pendingBonusItemPlay
+  if (!pending) return { game, error: 'No bonus item play pending.' }
+
+  const { sourcePlayerIndex } = pending
+  const player = game.players[sourcePlayerIndex]
+  const cardIndex = player.hand.findIndex((c) => c.instanceId === itemInstanceId)
+  if (cardIndex === -1) return { game, error: 'Item not found in hand.' }
+
+  const card = player.hand[cardIndex]
+  const isItem = card.type === CARD_TYPES.ITEM
+  const isCursedItem = card.type === CARD_TYPES.CURSED_ITEM
+  if (!isItem && !isCursedItem) return { game, error: 'Not an item card.' }
+
+  // Validate eligibility
+  if (pending.eligibleInstanceIds !== null && !pending.eligibleInstanceIds.includes(itemInstanceId)) {
+    return { game, error: 'That card is not eligible for this effect.' }
+  }
+
+  // Validate target
+  if (isItem && heroOwnerIndex !== sourcePlayerIndex) {
+    return { game, error: 'Regular items must be equipped to your own heroes.' }
+  }
+  if (isCursedItem && heroOwnerIndex === sourcePlayerIndex) {
+    return { game, error: 'Cursed items must be equipped to opponent heroes.' }
+  }
+
+  const targetPlayer = game.players[heroOwnerIndex]
+  const slot = targetPlayer?.partySlots[slotIndex]
+  if (!slot) return { game, error: 'No hero in that slot.' }
+
+  // Remove item from source hand
+  const newHand = player.hand.filter((_, i) => i !== cardIndex)
+  const equippedItem = { ...card, faceUp: true }
+
+  // Add item to target hero slot
+  const newSlots = targetPlayer.partySlots.map((s, i) =>
+    i === slotIndex ? { ...s, items: [...s.items, equippedItem] } : s,
+  )
+
+  let players = game.players.map((p, i) => {
+    if (i === sourcePlayerIndex && i === heroOwnerIndex) {
+      return { ...p, hand: newHand, partySlots: newSlots }
+    }
+    if (i === sourcePlayerIndex) return { ...p, hand: newHand }
+    if (i === heroOwnerIndex) return { ...p, partySlots: newSlots }
+    return p
+  })
+
+  let nextGame = { ...game, players, pendingBonusItemPlay: null }
+
+  if (pending.drawAfter > 0) {
+    const { game: afterDraw } = drawEffect(nextGame, { playerIndex: sourcePlayerIndex, count: pending.drawAfter })
+    nextGame = afterDraw
+  }
+
+  return { game: nextGame }
+}
+
+/**
+ * Pass the bonus item play (skip equipping) and draw `drawAfter` cards.
+ * @param {GameState} game
+ */
+export function passBonusItemPlay(game) {
+  const pending = game.pendingBonusItemPlay
+  if (!pending) return { game, error: 'No bonus item play pending.' }
+  let nextGame = { ...game, pendingBonusItemPlay: null }
+  if (pending.drawAfter > 0) {
+    const { game: afterDraw } = drawEffect(nextGame, { playerIndex: pending.sourcePlayerIndex, count: pending.drawAfter })
+    nextGame = afterDraw
+  }
+  return { game: nextGame }
+}
+
+// ─── Magic Play Choice (Snowball 067, Buttons 072) ───────────────────────────
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingMagicPlayChoiceActive(game) {
+  return (game.pendingMagicPlayChoice ?? null) !== null
+}
+
+/**
+ * Source player confirms playing the drawn/pulled Magic card immediately.
+ * Removes it from hand, discards it, runs its effect, then draws `drawAfterPlay` cards.
+ * @param {GameState} game
+ */
+export function confirmMagicPlayChoice(game) {
+  const pending = game.pendingMagicPlayChoice
+  if (!pending) return { game, error: 'No magic play choice pending.' }
+
+  const player = game.players[pending.sourcePlayerIndex]
+  const handIndex = player?.hand.findIndex((c) => c.instanceId === pending.magicCard.instanceId) ?? -1
+  if (handIndex === -1) return { game: { ...game, pendingMagicPlayChoice: null } }
+
+  const card = withFaceUp(player.hand[handIndex])
+  const hand = player.hand.filter((_, i) => i !== handIndex)
+  const players = game.players.map((p, i) =>
+    i === pending.sourcePlayerIndex ? { ...p, hand } : p,
+  )
+
+  const cleared = { ...game, players, pendingMagicPlayChoice: null }
+
+  // Draw bonus cards first, then run magic effect via staged play (no AP, no challenge)
+  let afterDraw = cleared
+  if ((pending.drawAfterPlay ?? 0) > 0) {
+    const { game: gd } = drawEffect(cleared, { playerIndex: pending.sourcePlayerIndex, count: pending.drawAfterPlay })
+    afterDraw = gd
+  }
+
+  /** @type {StagedPlay} */
+  const staged = { card, attackerIndex: pending.sourcePlayerIndex, cardType: CARD_TYPES.MAGIC }
+  return resolveStagedPlay(afterDraw, staged)
+}
+
+/**
+ * Source player declines playing the Magic card — it stays in their hand.
+ * @param {GameState} game
+ */
+export function declineMagicPlayChoice(game) {
+  if (!game.pendingMagicPlayChoice) return { game, error: 'No magic play choice pending.' }
+  return { game: { ...game, pendingMagicPlayChoice: null } }
+}
+
+// ─── Wiggles (069) bonus hero skill roll ─────────────────────────────────────
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingWigglesRollActive(game) {
+  return (game.pendingWigglesRoll ?? null) !== null
+}
+
+/**
+ * Source player confirms rolling for the stolen hero's ability (bonus — no AP cost).
+ * @param {GameState} game
+ */
+export function confirmWigglesRoll(game) {
+  const pending = game.pendingWigglesRoll
+  if (!pending) return { game, diceRoll: null, error: 'No Wiggles roll pending.' }
+
+  // Find the stolen hero in source player's party
+  const player = game.players[pending.sourcePlayerIndex]
+  const slot = player?.partySlots.find((s) => s?.hero.instanceId === pending.stolenHeroInstanceId)
+  if (!slot) return { game: { ...game, pendingWigglesRoll: null }, diceRoll: null }
+
+  const hero = slot.hero
+  const baseRoll = rollForHeroEffect(hero.rollRequirement ?? 6, pending.sourcePlayerIndex)
+  const cursedRoll = applyHeroRollCurses(baseRoll, slot.items, game.globalRollBonus ?? 0)
+  const pendingRoll = attachHeroEffectMeta(cursedRoll, hero, pending.sourcePlayerIndex)
+
+  return {
+    game: {
+      ...game,
+      pendingWigglesRoll: null,
+      pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
+    },
+    diceRoll: pendingRoll,
+  }
+}
+
+/**
+ * Source player declines rolling for the stolen hero's ability.
+ * @param {GameState} game
+ */
+export function declineWigglesRoll(game) {
+  if (!game.pendingWigglesRoll) return { game, error: 'No Wiggles roll pending.' }
+  return { game: { ...game, pendingWigglesRoll: null } }
+}
+
+/**
+ * @param {GameState} game
+ */
+export function passChallengeWindow(game, playerIndex = null) {
   if (!game.pendingChallenge) {
     return { game, diceRoll: null }
   }
 
+  const attackerIndex = game.pendingChallenge.stagedPlay.attackerIndex
+
+  if (playerIndex !== null) {
+    const passedBy = [...(game.challengePassedBy ?? []), playerIndex]
+    const nonAttackers = game.players.map((_, i) => i).filter((i) => i !== attackerIndex)
+    const allPassed = nonAttackers.every((i) => passedBy.includes(i))
+
+    if (!allPassed) {
+      return {
+        game: { ...game, challengePassedBy: passedBy },
+        diceRoll: null,
+      }
+    }
+  }
+
   const staged = game.pendingChallenge.stagedPlay
-  const cleared = { ...game, pendingChallenge: null }
+  const cleared = { ...game, pendingChallenge: null, challengePassedBy: [], challengeStartedAt: null }
   return resolveStagedPlay(cleared, staged)
 }
 
@@ -1021,7 +1343,11 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
       players,
       discardPile,
       pendingChallenge: null,
+      challengePassedBy: [],
+      challengeStartedAt: null,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
     error: null,
@@ -1192,6 +1518,8 @@ export function triggerHeroSkill(game, heroInstanceId) {
       players,
       actionPoints: game.actionPoints - 1,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     diceRoll: pendingRoll,
   }
@@ -1238,6 +1566,8 @@ export function attackMonster(game, monsterInstanceId) {
       ...game,
       actionPoints: game.actionPoints - ATTACK_MONSTER_AP_COST,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     diceRoll: pendingRoll,
   }
@@ -1323,6 +1653,8 @@ export function playModifierOnPendingRoll(
       players,
       discardPile,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
@@ -1365,6 +1697,84 @@ function finalizeHeroRoll(game) {
 }
 
 /**
+ * Resolve a monster attack roll after the modifier phase completes.
+ * - sum >= successAtOrAbove (8): monster slain → move to player's slainMonsters,
+ *   draw next monster from deck to fill the gap.
+ * - sum <= failAtOrBelow (5): failure → player must sacrifice one of their own heroes.
+ * - otherwise: nothing happens.
+ *
+ * @param {GameState} game
+ * @returns {{ game: GameState, monsterSlain?: boolean }}
+ */
+function finalizeMonsterRoll(game) {
+  const roll = game.pendingRoll
+  if (!roll || roll.rollType !== 'monster') return { game }
+
+  const { currentSum, rollingPlayerIndex, targetMonsterInstanceId } = roll
+  const failAt = roll.failAtOrBelow ?? 5
+  const succeedAt = roll.successAtOrAbove ?? 8
+
+  const cleared = { ...game, pendingRoll: null }
+
+  if (currentSum >= succeedAt) {
+    // ── Success: slay the monster ──────────────────────────────────────────
+    const monster = cleared.activeMonsters.find(
+      (m) => m.instanceId === targetMonsterInstanceId,
+    )
+    if (!monster) return { game: cleared }
+
+    const newActiveMonsters = cleared.activeMonsters.filter(
+      (m) => m.instanceId !== targetMonsterInstanceId,
+    )
+
+    // Draw replacement from monster deck (if any remain)
+    const [nextMonster, ...remainingDeck] = cleared.monsterDeck
+    const refilled = nextMonster
+      ? [...newActiveMonsters, withFaceUp(nextMonster)]
+      : newActiveMonsters
+
+    // Add to the slaying player's slainMonsters
+    const players = cleared.players.map((p, i) =>
+      i === rollingPlayerIndex
+        ? { ...p, slainMonsters: [...p.slainMonsters, withFaceUp(monster)] }
+        : p,
+    )
+
+    return {
+      game: {
+        ...cleared,
+        players,
+        activeMonsters: refilled,
+        monsterDeck: nextMonster ? remainingDeck : cleared.monsterDeck,
+      },
+      monsterSlain: true,
+    }
+  }
+
+  if (currentSum <= failAt) {
+    // ── Failure: player must sacrifice a hero ──────────────────────────────
+    const player = cleared.players[rollingPlayerIndex]
+    const hasHero = player?.partySlots.some((s) => s !== null)
+    if (!hasHero) return { game: cleared }
+
+    return {
+      game: {
+        ...cleared,
+        pendingHeroSelection: {
+          sourcePlayerIndex: rollingPlayerIndex,
+          scope: 'own',
+          action: 'sacrifice',
+          sourceLabel: 'Monster Attack Failed',
+        },
+      },
+    }
+  }
+
+  // Neutral — nothing happens
+  return { game: cleared }
+}
+
+/**
  * @param {GameState} game
  */
 export function passModifierPhase(game) {
@@ -1380,27 +1790,51 @@ export function passModifierPhase(game) {
     return finalizeHeroRoll(game).game
   }
 
+  if (game.pendingRoll.rollType === 'monster') {
+    return finalizeMonsterRoll(game).game
+  }
+
   return { ...game, pendingRoll: null }
 }
 
 /**
  * @param {GameState} game
  */
-export function passModifierPhaseWithResult(game) {
+export function passModifierPhaseWithResult(game, playerIndex = null) {
   if (!game.pendingRoll) {
     return { game, diceRoll: null, challengeSuccess: false }
   }
 
-  if (game.pendingRoll.rollType === 'challenge') {
-    return finalizeChallenge(game)
+  if (playerIndex !== null) {
+    const passedBy = [...(game.modifierPassedBy ?? []), playerIndex]
+    const allPassed = game.players.every((_, i) => passedBy.includes(i))
+
+    if (!allPassed) {
+      return {
+        game: { ...game, modifierPassedBy: passedBy },
+        diceRoll: null,
+        challengeSuccess: false,
+      }
+    }
   }
 
-  if (game.pendingRoll.rollType === 'hero') {
-    return { ...finalizeHeroRoll(game), challengeSuccess: false }
+  const cleared = { ...game, modifierPassedBy: [] }
+
+  if (cleared.pendingRoll.rollType === 'challenge') {
+    return finalizeChallenge(cleared)
+  }
+
+  if (cleared.pendingRoll.rollType === 'hero') {
+    return { ...finalizeHeroRoll(cleared), challengeSuccess: false }
+  }
+
+  if (cleared.pendingRoll.rollType === 'monster') {
+    const { game: afterMonster, monsterSlain } = finalizeMonsterRoll(cleared)
+    return { game: afterMonster, diceRoll: null, challengeSuccess: false, monsterSlain }
   }
 
   return {
-    game: { ...game, pendingRoll: null },
+    game: { ...cleared, pendingRoll: null },
     diceRoll: null,
     challengeSuccess: false,
   }
@@ -1447,6 +1881,8 @@ export function selectEffectTarget(game, targetPlayerIndex) {
       ...game,
       pendingEffectTargetSelection: null,
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
@@ -1485,15 +1921,29 @@ export function resolveCardPull(game, instanceId) {
     return { game, error }
   }
 
-  // Check for bonus pull (only once — bonusTriggerType is null on the bonus pick)
-  const bonusTriggered =
-    pending.bonusTriggerType !== null &&
-    card.type === pending.bonusTriggerType &&
-    afterPull.players[pending.targetPlayerIndex].hand.length > 0
-
+  // Plundering Puma-style: more pulls still queued
+  const currentRemaining = pending.remainingPulls ?? 1
+  const targetHandAfter = afterPull.players[pending.targetPlayerIndex].hand
   /** @type {import('./gameState.js').PendingCardPull | null} */
-  const nextCardPull = bonusTriggered
-    ? {
+  let nextCardPull = null
+
+  if (currentRemaining > 1 && targetHandAfter.length > 0) {
+    nextCardPull = {
+      sourcePlayerIndex: pending.sourcePlayerIndex,
+      targetPlayerIndex: pending.targetPlayerIndex,
+      bonusTriggerType: pending.bonusTriggerType,
+      sourceLabel: pending.sourceLabel,
+      remainingPulls: currentRemaining - 1,
+      drawForTargetAfter: pending.drawForTargetAfter,
+    }
+  } else {
+    // Check for bonus pull (only once — bonusTriggerType is null on the bonus pick)
+    const bonusTriggered =
+      pending.bonusTriggerType !== null &&
+      card.type === pending.bonusTriggerType &&
+      targetHandAfter.length > 0
+    if (bonusTriggered) {
+      nextCardPull = {
         sourcePlayerIndex: pending.sourcePlayerIndex,
         targetPlayerIndex: pending.targetPlayerIndex,
         bonusTriggerType: null,
@@ -1501,16 +1951,37 @@ export function resolveCardPull(game, instanceId) {
         allowImmediateHeroPlay: pending.allowImmediateHeroPlay,
         isBonusPull: true,
       }
-    : null
+    }
+  }
+
+  // After last pull: draw compensation cards for target if requested
+  let gameAfterExtras = afterPull
+  if (!nextCardPull && (pending.drawForTargetAfter ?? 0) > 0) {
+    const { game: gd } = drawEffect(afterPull, {
+      playerIndex: pending.targetPlayerIndex,
+      count: pending.drawForTargetAfter,
+    })
+    gameAfterExtras = gd
+  }
 
   // Lucky Bucky-style follow-up: if the pulled card is Hero, allow immediate play.
   const openHeroPlayChoice =
     pending.allowImmediateHeroPlay === true &&
     card.type === CARD_TYPES.HERO
 
+  // Sly Pickings-style follow-up: if the pulled card is an item, allow immediate play.
+  const openItemPlayChoice =
+    pending.allowImmediateItemPlay === true &&
+    (card.type === CARD_TYPES.ITEM || card.type === CARD_TYPES.CURSED_ITEM)
+
+  // Buttons-style follow-up: if the pulled card is a Magic card, allow immediate play.
+  const openMagicPlayChoice =
+    pending.allowImmediateMagicPlay === true &&
+    card.type === CARD_TYPES.MAGIC
+
   return {
     game: {
-      ...afterPull,
+      ...gameAfterExtras,
       pendingCardPull: nextCardPull,
       ...(openHeroPlayChoice
         ? {
@@ -1518,6 +1989,26 @@ export function resolveCardPull(game, instanceId) {
               sourcePlayerIndex: pending.sourcePlayerIndex,
               heroCard: withFaceUp(card),
               sourceLabel: pending.sourceLabel,
+            },
+          }
+        : {}),
+      ...(openItemPlayChoice
+        ? {
+            pendingBonusItemPlay: {
+              sourcePlayerIndex: pending.sourcePlayerIndex,
+              sourceLabel: pending.sourceLabel,
+              eligibleInstanceIds: [card.instanceId],
+              drawAfter: 0,
+            },
+          }
+        : {}),
+      ...(openMagicPlayChoice
+        ? {
+            pendingMagicPlayChoice: {
+              sourcePlayerIndex: pending.sourcePlayerIndex,
+              magicCard: withFaceUp(card),
+              sourceLabel: pending.sourceLabel,
+              drawAfterPlay: 0,
             },
           }
         : {}),
@@ -1582,6 +2073,8 @@ export function selectEffectHeroTarget(game, heroInstanceId) {
       pendingEffectHeroTargetSelection: null,
       pendingDestroyTargets: [heroInstanceId],
       pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
@@ -1684,9 +2177,28 @@ export function confirmQiBearSelection(game, sourcePlayerIndex) {
       pendingQiBearSelection: null,
       pendingRoll,
       pendingDestroyTargets: sel.heroTargets,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
+}
+
+/**
+/**
+ * Cancel the current hero selection (destroy/steal/swap) without doing anything.
+ * @param {GameState} game
+ */
+export function cancelHeroSelection(game) {
+  return { game: { ...game, pendingHeroSelection: null } }
+}
+
+/**
+ * Cancel the pre-roll hero target selection (Bad Axe / Tipsy Tootie style) without doing anything.
+ * @param {GameState} game
+ */
+export function cancelEffectHeroTargetSelection(game) {
+  return { game: { ...game, pendingEffectHeroTargetSelection: null } }
 }
 
 /**
@@ -1776,10 +2288,11 @@ export function selectHeroForPendingAction(game, partyOwnerIndex, heroInstanceId
   }
 
   const continuation = sel.afterPendingDiscard ?? null
+  const nextHeroSel = sel.afterHeroSelection ?? null
   return {
     game: {
       ...result.game,
-      pendingHeroSelection: null,
+      pendingHeroSelection: nextHeroSel,
       pendingDiscard: continuation,
     },
   }
@@ -2210,10 +2723,37 @@ export function drawCard(game) {
   }
 }
 
+const ALL_HERO_CLASSES = Object.values(HERO_CLASSES)
+
+/**
+ * Check if a player has met either win condition.
+ * Returns the winning playerIndex, or -1 if no winner yet.
+ * @param {GameState} game
+ * @param {number} playerIndex
+ */
+function checkWinCondition(game, playerIndex) {
+  const player = game.players[playerIndex]
+  if (!player) return false
+
+  // Condition 1: slain 3+ monsters
+  if (player.slainMonsters.length >= 3) return true
+
+  // Condition 2: at least one hero of every class in party
+  const classesInParty = new Set(
+    player.partySlots
+      .filter((s) => s !== null)
+      .map((s) => s.hero.class),
+  )
+  if (ALL_HERO_CLASSES.every((cls) => classesInParty.has(cls))) return true
+
+  return false
+}
+
 /**
  * @param {GameState} game
  */
 export function endTurn(game) {
+  if (game.winner != null) return game
   const nextIndex = (game.currentPlayerIndex + 1) % game.players.length
 
   const players = game.players.map((p, index) => ({
@@ -2244,6 +2784,20 @@ export function endTurn(game) {
     pendingDestroyTargets: [],
     globalRollBonus: 0,
     pendingItemSelection: null,
+    pendingTopDeckPick: null,
+    pendingBonusItemPlay: null,
+    pendingMagicPlayChoice: null,
+    pendingWigglesRoll: null,
+    antiChallenge: false,
+    antiModifier: false,
+    challengePassedBy: [],
+    modifierPassedBy: [],
+    challengeStartedAt: null,
+    modifierStartedAt: null,
+    // Party protections expire when it becomes that player's turn again
+    partyAntiSteal: game.partyAntiSteal === nextIndex ? null : (game.partyAntiSteal ?? null),
+    partyAntiDestroy: game.partyAntiDestroy === nextIndex ? null : (game.partyAntiDestroy ?? null),
+    winner: checkWinCondition(game, game.currentPlayerIndex) ? game.currentPlayerIndex : null,
   }
 }
 

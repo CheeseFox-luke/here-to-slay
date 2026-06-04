@@ -230,9 +230,53 @@ export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstan
   if (slot?.hero?.antiDestroy === true) {
     return { game, error: 'That hero cannot be destroyed (antiDestroy).' }
   }
+  if (game.partyAntiDestroy === targetPlayerIndex) {
+    return { game, error: "That player's party cannot be destroyed right now." }
+  }
   const { game: after, blocked } = tryDecoyDoll(game, targetPlayerIndex, heroInstanceId)
   if (blocked) return { game: after }
   return removeHeroToDiscard(after, targetPlayerIndex, heroInstanceId)
+}
+
+/**
+ * Shurikitty (061): destroy an opponent's hero; any equipped items go to the
+ * source player's hand instead of the discard pile.
+ *
+ * @param {GameState} game
+ * @param {{ sourcePlayerIndex: number, targetPlayerIndex: number, heroInstanceId: string }} params
+ */
+export function destroyAndTakeItems(game, { sourcePlayerIndex, targetPlayerIndex, heroInstanceId }) {
+  if (sourcePlayerIndex === targetPlayerIndex) {
+    return { game, error: 'Use sacrifice to remove your own hero.' }
+  }
+  const target = game.players[targetPlayerIndex]
+  const slot = target?.partySlots.find((s) => s?.hero.instanceId === heroInstanceId)
+  if (slot?.hero?.antiDestroy === true) {
+    return { game, error: 'That hero cannot be destroyed (antiDestroy).' }
+  }
+  if (game.partyAntiDestroy === targetPlayerIndex) {
+    return { game, error: "That player's party cannot be destroyed right now." }
+  }
+  const { game: after, blocked } = tryDecoyDoll(game, targetPlayerIndex, heroInstanceId)
+  if (blocked) return { game: after }
+
+  const owner = after.players[targetPlayerIndex]
+  const slotIndex = owner.partySlots.findIndex((s) => s?.hero.instanceId === heroInstanceId)
+  if (slotIndex === -1) return { game: after, error: 'Hero not in party.' }
+
+  const heroSlot = owner.partySlots[slotIndex]
+  const partySlots = clonePartySlots(owner.partySlots)
+  partySlots[slotIndex] = null
+
+  const discardPile = [...after.discardPile, withFaceUp(heroSlot.hero)]
+  const itemsForHand = heroSlot.items.map((c) => withFaceUp(c))
+
+  const players = after.players.map((p, i) => {
+    if (i === targetPlayerIndex) return { ...p, partySlots }
+    if (i === sourcePlayerIndex) return { ...p, hand: [...p.hand, ...itemsForHand] }
+    return p
+  })
+  return { game: { ...after, players, discardPile } }
 }
 
 /**
@@ -258,6 +302,9 @@ export function steal(game, { sourcePlayerIndex, targetPlayerIndex, heroInstance
   }
   if (target.partySlots[targetSlotIndex].hero.antiSteal === true) {
     return { game, error: 'That hero cannot be stolen (antiSteal).' }
+  }
+  if (game.partyAntiSteal === targetPlayerIndex) {
+    return { game, error: "That player's party cannot be stolen from right now." }
   }
   const sourceEmptyIndex = source.partySlots.findIndex((s) => s === null)
   if (sourceEmptyIndex === -1) {
@@ -548,6 +595,24 @@ export function applyAntiModifier(game) {
  */
 export function clearAntiModifier(game) {
   return { game: { ...game, antiModifier: false } }
+}
+
+/**
+ * Mark an entire player's party as protected from steal until their next turn.
+ * @param {GameState} game
+ * @param {{ playerIndex: number }} params
+ */
+export function applyPartyAntiSteal(game, { playerIndex }) {
+  return { game: { ...game, partyAntiSteal: playerIndex } }
+}
+
+/**
+ * Mark an entire player's party as protected from destroy until their next turn.
+ * @param {GameState} game
+ * @param {{ playerIndex: number }} params
+ */
+export function applyPartyAntiDestroy(game, { playerIndex }) {
+  return { game: { ...game, partyAntiDestroy: playerIndex } }
 }
 
 /**

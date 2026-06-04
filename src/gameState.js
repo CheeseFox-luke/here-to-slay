@@ -181,7 +181,35 @@ export function partyHasHero(partySlots) {
  * @property {string} sourceLabel
  * @property {boolean} [allowImmediateHeroPlay] - if true and the pulled card is
  *   a Hero, source player may play it immediately (using pendingHeroPlayChoice)
+ * @property {boolean} [allowImmediateItemPlay] - if true and the pulled card is
+ *   an Item/CursedItem, source player may play it immediately (Sly Pickings 064)
  * @property {boolean} [isBonusPull]
+ * @property {boolean} [showFaceUp] - if true, target hand is shown face-up (Sharp Fox / Silent Shadow)
+ * @property {number} [remainingPulls] - pulls still to perform including this one (Plundering Puma 060)
+ * @property {number} [drawForTargetAfter] - cards the target draws after all pulls resolve
+ */
+
+/**
+ * Bullseye (055): look at the top N cards of the deck.
+ * Phase 'pick': player picks 1 to add to hand.
+ * Phase 'order': player picks which of the remaining 2 goes on top (the other goes second).
+ *
+ * @typedef {Object} PendingTopDeckPick
+ * @property {number} sourcePlayerIndex
+ * @property {string} sourceLabel
+ * @property {CardInstance[]} cards - the cards currently displayed (3 in 'pick', 2 in 'order')
+ * @property {'pick' | 'order'} phase
+ */
+
+/**
+ * Quick Draw (056) / Hook (057): play an item from hand as a bonus (no AP cost).
+ * After resolving (or passing), draw `drawAfter` cards.
+ *
+ * @typedef {Object} PendingBonusItemPlay
+ * @property {number} sourcePlayerIndex
+ * @property {string} sourceLabel
+ * @property {string[] | null} eligibleInstanceIds - null means any item/cursed_item in hand
+ * @property {number} drawAfter - cards to draw after resolution
  */
 
 /**
@@ -266,8 +294,29 @@ export function partyHasHero(partySlots) {
  * @property {string} sourceLabel - label shown in the UI (e.g. card name)
  * @property {PendingDiscard | null} [afterPendingDiscard] - continuation to
  *   restore as `pendingDiscard` once the selection completes (Qi Bear chain).
+ * @property {PendingHeroSelection | null} [afterHeroSelection] - chain: open another hero selection after this one resolves (Fluffy, Spooky, Whiskers).
  * @property {string} [swapSourceHeroInstanceId] - for swapTarget: instanceId of the first-picked hero
  * @property {number} [swapSourcePlayerIndex] - for swapTarget: party owner of first-picked hero
+ */
+
+/**
+ * Snowball (067) / Buttons (072): source player may play a pulled/drawn Magic card immediately.
+ *
+ * @typedef {Object} PendingMagicPlayChoice
+ * @property {number} sourcePlayerIndex
+ * @property {CardInstance} magicCard - the Magic card in hand
+ * @property {string} sourceLabel
+ * @property {number} [drawAfterPlay] - bonus cards to draw after playing
+ */
+
+/**
+ * Wiggles (069): after stealing a hero, the source player may immediately roll
+ * for that hero's effect (bonus roll — no AP cost, hero can still be used later).
+ *
+ * @typedef {Object} PendingWigglesRoll
+ * @property {number} sourcePlayerIndex
+ * @property {string} stolenHeroInstanceId
+ * @property {string} stolenHeroName
  */
 
 /**
@@ -315,12 +364,20 @@ export function partyHasHero(partySlots) {
  * @property {boolean} [antiModifier] - while true, no player may play a Modifier card.
  * @property {number} [globalRollBonus] - flat bonus added to every roll until end of turn.
  * @property {PendingItemSelection | null} [pendingItemSelection]
+ * @property {PendingTopDeckPick | null} [pendingTopDeckPick]
+ * @property {PendingBonusItemPlay | null} [pendingBonusItemPlay]
+ * @property {PendingMagicPlayChoice | null} [pendingMagicPlayChoice]
+ * @property {PendingWigglesRoll | null} [pendingWigglesRoll]
+ * @property {number | null} [partyAntiSteal] - playerIndex whose entire party cannot be stolen; cleared at start of that player's next turn.
+ * @property {number | null} [partyAntiDestroy] - playerIndex whose entire party cannot be destroyed; cleared at start of that player's next turn.
+ * @property {number | null} [winner] - playerIndex of the winner; null while game is ongoing.
  */
 
 /**
  * @typedef {Object} PendingItemSelection
  * @property {number} sourcePlayerIndex - player who triggered the effect
  * @property {string} sourceLabel
+ * @property {string} [kind] - 'holyCurselifter' restricts selection to own cursed items
  */
 
 /**
@@ -377,6 +434,13 @@ export const initialGameState = {
   pendingDestroyTargets: [],
   antiChallenge: false,
   antiModifier: false,
+  challengePassedBy: [],
+  modifierPassedBy: [],
+  challengeStartedAt: null,
+  modifierStartedAt: null,
+  partyAntiSteal: null,
+  partyAntiDestroy: null,
+  winner: null,
 }
 
 export const RESTOCK_HAND_AP_COST = 3
@@ -446,5 +510,10 @@ export function initGame(playerCount) {
     pendingDestroyTargets: [],
     antiChallenge: false,
     antiModifier: false,
+    challengePassedBy: [],
+    modifierPassedBy: [],
+    challengeStartedAt: null,
+    modifierStartedAt: null,
+    winner: null,
   }
 }

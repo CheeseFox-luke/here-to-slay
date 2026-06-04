@@ -9,6 +9,7 @@ import './CardPullDialog.css'
  *   cards: import('../gameState.js').CardInstance[]
  *   isBonusPull?: boolean
  *   bonusTriggerHint?: string
+ *   showFaceUp?: boolean
  *   onPick: (instanceId: string) => void
  * }} props
  */
@@ -19,6 +20,7 @@ function CardPullDialog({
   cards,
   isBonusPull = false,
   bonusTriggerHint,
+  showFaceUp = false,
   onPick,
 }) {
   if (!open || !cards || cards.length === 0) return null
@@ -51,7 +53,7 @@ function CardPullDialog({
               onClick={() => onPick(card.instanceId)}
               title="Click to pull this card"
             >
-              <CardDisplay card={card} faceUp={false} />
+              <CardDisplay card={card} faceUp={showFaceUp} />
             </button>
           ))}
         </div>
