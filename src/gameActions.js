@@ -1162,6 +1162,105 @@ export function passBonusItemPlay(game) {
   return { game: nextGame }
 }
 
+// ─── Magic Play Choice (Snowball 067, Buttons 072) ───────────────────────────
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingMagicPlayChoiceActive(game) {
+  return (game.pendingMagicPlayChoice ?? null) !== null
+}
+
+/**
+ * Source player confirms playing the drawn/pulled Magic card immediately.
+ * Removes it from hand, discards it, runs its effect, then draws `drawAfterPlay` cards.
+ * @param {GameState} game
+ */
+export function confirmMagicPlayChoice(game) {
+  const pending = game.pendingMagicPlayChoice
+  if (!pending) return { game, error: 'No magic play choice pending.' }
+
+  const player = game.players[pending.sourcePlayerIndex]
+  const handIndex = player?.hand.findIndex((c) => c.instanceId === pending.magicCard.instanceId) ?? -1
+  if (handIndex === -1) return { game: { ...game, pendingMagicPlayChoice: null } }
+
+  const card = withFaceUp(player.hand[handIndex])
+  const hand = player.hand.filter((_, i) => i !== handIndex)
+  const players = game.players.map((p, i) =>
+    i === pending.sourcePlayerIndex ? { ...p, hand } : p,
+  )
+
+  const cleared = { ...game, players, pendingMagicPlayChoice: null }
+
+  // Draw bonus cards first, then run magic effect via staged play (no AP, no challenge)
+  let afterDraw = cleared
+  if ((pending.drawAfterPlay ?? 0) > 0) {
+    const { game: gd } = drawEffect(cleared, { playerIndex: pending.sourcePlayerIndex, count: pending.drawAfterPlay })
+    afterDraw = gd
+  }
+
+  /** @type {StagedPlay} */
+  const staged = { card, attackerIndex: pending.sourcePlayerIndex, cardType: CARD_TYPES.MAGIC }
+  return resolveStagedPlay(afterDraw, staged)
+}
+
+/**
+ * Source player declines playing the Magic card — it stays in their hand.
+ * @param {GameState} game
+ */
+export function declineMagicPlayChoice(game) {
+  if (!game.pendingMagicPlayChoice) return { game, error: 'No magic play choice pending.' }
+  return { game: { ...game, pendingMagicPlayChoice: null } }
+}
+
+// ─── Wiggles (069) bonus hero skill roll ─────────────────────────────────────
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingWigglesRollActive(game) {
+  return (game.pendingWigglesRoll ?? null) !== null
+}
+
+/**
+ * Source player confirms rolling for the stolen hero's ability (bonus — no AP cost).
+ * @param {GameState} game
+ */
+export function confirmWigglesRoll(game) {
+  const pending = game.pendingWigglesRoll
+  if (!pending) return { game, diceRoll: null, error: 'No Wiggles roll pending.' }
+
+  // Find the stolen hero in source player's party
+  const player = game.players[pending.sourcePlayerIndex]
+  const slot = player?.partySlots.find((s) => s?.hero.instanceId === pending.stolenHeroInstanceId)
+  if (!slot) return { game: { ...game, pendingWigglesRoll: null }, diceRoll: null }
+
+  const hero = slot.hero
+  const baseRoll = rollForHeroEffect(hero.rollRequirement ?? 6, pending.sourcePlayerIndex)
+  const cursedRoll = applyHeroRollCurses(baseRoll, slot.items, game.globalRollBonus ?? 0)
+  const pendingRoll = attachHeroEffectMeta(cursedRoll, hero, pending.sourcePlayerIndex)
+
+  return {
+    game: {
+      ...game,
+      pendingWigglesRoll: null,
+      pendingRoll,
+      modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
+    },
+    diceRoll: pendingRoll,
+  }
+}
+
+/**
+ * Source player declines rolling for the stolen hero's ability.
+ * @param {GameState} game
+ */
+export function declineWigglesRoll(game) {
+  if (!game.pendingWigglesRoll) return { game, error: 'No Wiggles roll pending.' }
+  return { game: { ...game, pendingWigglesRoll: null } }
+}
+
 /**
  * @param {GameState} game
  */
@@ -1735,15 +1834,29 @@ export function resolveCardPull(game, instanceId) {
     return { game, error }
   }
 
-  // Check for bonus pull (only once — bonusTriggerType is null on the bonus pick)
-  const bonusTriggered =
-    pending.bonusTriggerType !== null &&
-    card.type === pending.bonusTriggerType &&
-    afterPull.players[pending.targetPlayerIndex].hand.length > 0
-
+  // Plundering Puma-style: more pulls still queued
+  const currentRemaining = pending.remainingPulls ?? 1
+  const targetHandAfter = afterPull.players[pending.targetPlayerIndex].hand
   /** @type {import('./gameState.js').PendingCardPull | null} */
-  const nextCardPull = bonusTriggered
-    ? {
+  let nextCardPull = null
+
+  if (currentRemaining > 1 && targetHandAfter.length > 0) {
+    nextCardPull = {
+      sourcePlayerIndex: pending.sourcePlayerIndex,
+      targetPlayerIndex: pending.targetPlayerIndex,
+      bonusTriggerType: pending.bonusTriggerType,
+      sourceLabel: pending.sourceLabel,
+      remainingPulls: currentRemaining - 1,
+      drawForTargetAfter: pending.drawForTargetAfter,
+    }
+  } else {
+    // Check for bonus pull (only once — bonusTriggerType is null on the bonus pick)
+    const bonusTriggered =
+      pending.bonusTriggerType !== null &&
+      card.type === pending.bonusTriggerType &&
+      targetHandAfter.length > 0
+    if (bonusTriggered) {
+      nextCardPull = {
         sourcePlayerIndex: pending.sourcePlayerIndex,
         targetPlayerIndex: pending.targetPlayerIndex,
         bonusTriggerType: null,
@@ -1751,16 +1864,37 @@ export function resolveCardPull(game, instanceId) {
         allowImmediateHeroPlay: pending.allowImmediateHeroPlay,
         isBonusPull: true,
       }
-    : null
+    }
+  }
+
+  // After last pull: draw compensation cards for target if requested
+  let gameAfterExtras = afterPull
+  if (!nextCardPull && (pending.drawForTargetAfter ?? 0) > 0) {
+    const { game: gd } = drawEffect(afterPull, {
+      playerIndex: pending.targetPlayerIndex,
+      count: pending.drawForTargetAfter,
+    })
+    gameAfterExtras = gd
+  }
 
   // Lucky Bucky-style follow-up: if the pulled card is Hero, allow immediate play.
   const openHeroPlayChoice =
     pending.allowImmediateHeroPlay === true &&
     card.type === CARD_TYPES.HERO
 
+  // Sly Pickings-style follow-up: if the pulled card is an item, allow immediate play.
+  const openItemPlayChoice =
+    pending.allowImmediateItemPlay === true &&
+    (card.type === CARD_TYPES.ITEM || card.type === CARD_TYPES.CURSED_ITEM)
+
+  // Buttons-style follow-up: if the pulled card is a Magic card, allow immediate play.
+  const openMagicPlayChoice =
+    pending.allowImmediateMagicPlay === true &&
+    card.type === CARD_TYPES.MAGIC
+
   return {
     game: {
-      ...afterPull,
+      ...gameAfterExtras,
       pendingCardPull: nextCardPull,
       ...(openHeroPlayChoice
         ? {
@@ -1768,6 +1902,26 @@ export function resolveCardPull(game, instanceId) {
               sourcePlayerIndex: pending.sourcePlayerIndex,
               heroCard: withFaceUp(card),
               sourceLabel: pending.sourceLabel,
+            },
+          }
+        : {}),
+      ...(openItemPlayChoice
+        ? {
+            pendingBonusItemPlay: {
+              sourcePlayerIndex: pending.sourcePlayerIndex,
+              sourceLabel: pending.sourceLabel,
+              eligibleInstanceIds: [card.instanceId],
+              drawAfter: 0,
+            },
+          }
+        : {}),
+      ...(openMagicPlayChoice
+        ? {
+            pendingMagicPlayChoice: {
+              sourcePlayerIndex: pending.sourcePlayerIndex,
+              magicCard: withFaceUp(card),
+              sourceLabel: pending.sourceLabel,
+              drawAfterPlay: 0,
             },
           }
         : {}),
@@ -2047,10 +2201,11 @@ export function selectHeroForPendingAction(game, partyOwnerIndex, heroInstanceId
   }
 
   const continuation = sel.afterPendingDiscard ?? null
+  const nextHeroSel = sel.afterHeroSelection ?? null
   return {
     game: {
       ...result.game,
-      pendingHeroSelection: null,
+      pendingHeroSelection: nextHeroSel,
       pendingDiscard: continuation,
     },
   }
@@ -2517,6 +2672,8 @@ export function endTurn(game) {
     pendingItemSelection: null,
     pendingTopDeckPick: null,
     pendingBonusItemPlay: null,
+    pendingMagicPlayChoice: null,
+    pendingWigglesRoll: null,
     antiChallenge: false,
     antiModifier: false,
     challengePassedBy: [],

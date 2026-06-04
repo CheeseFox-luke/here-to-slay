@@ -239,6 +239,47 @@ export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstan
 }
 
 /**
+ * Shurikitty (061): destroy an opponent's hero; any equipped items go to the
+ * source player's hand instead of the discard pile.
+ *
+ * @param {GameState} game
+ * @param {{ sourcePlayerIndex: number, targetPlayerIndex: number, heroInstanceId: string }} params
+ */
+export function destroyAndTakeItems(game, { sourcePlayerIndex, targetPlayerIndex, heroInstanceId }) {
+  if (sourcePlayerIndex === targetPlayerIndex) {
+    return { game, error: 'Use sacrifice to remove your own hero.' }
+  }
+  const target = game.players[targetPlayerIndex]
+  const slot = target?.partySlots.find((s) => s?.hero.instanceId === heroInstanceId)
+  if (slot?.hero?.antiDestroy === true) {
+    return { game, error: 'That hero cannot be destroyed (antiDestroy).' }
+  }
+  if (game.partyAntiDestroy === targetPlayerIndex) {
+    return { game, error: "That player's party cannot be destroyed right now." }
+  }
+  const { game: after, blocked } = tryDecoyDoll(game, targetPlayerIndex, heroInstanceId)
+  if (blocked) return { game: after }
+
+  const owner = after.players[targetPlayerIndex]
+  const slotIndex = owner.partySlots.findIndex((s) => s?.hero.instanceId === heroInstanceId)
+  if (slotIndex === -1) return { game: after, error: 'Hero not in party.' }
+
+  const heroSlot = owner.partySlots[slotIndex]
+  const partySlots = clonePartySlots(owner.partySlots)
+  partySlots[slotIndex] = null
+
+  const discardPile = [...after.discardPile, withFaceUp(heroSlot.hero)]
+  const itemsForHand = heroSlot.items.map((c) => withFaceUp(c))
+
+  const players = after.players.map((p, i) => {
+    if (i === targetPlayerIndex) return { ...p, partySlots }
+    if (i === sourcePlayerIndex) return { ...p, hand: [...p.hand, ...itemsForHand] }
+    return p
+  })
+  return { game: { ...after, players, discardPile } }
+}
+
+/**
  * move another player's hero (with its items) into your own party.
  * @param {GameState} game
  * @param {{

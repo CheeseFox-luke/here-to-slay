@@ -1,5 +1,6 @@
 import { CARD_TYPES, HERO_CLASSES } from './data/cardUtils.js'
-import { applyPartyAntiDestroy, applyPartyAntiSteal, destroy, draw, give, sacrifice, swapHands, swapHero } from './effects.js'
+import { applyPartyAntiDestroy, applyPartyAntiSteal, destroy, destroyAndTakeItems, draw, give, pull, sacrifice, steal, swapHands, swapHero } from './effects.js'
+import { withFaceUp } from './gameState.js'
 
 /** @typedef {import('./gameState.js').GameState} GameState */
 /** @typedef {import('./gameState.js').CardInstance} CardInstance */
@@ -770,6 +771,429 @@ export function seriousGreyEffect(game, { sourcePlayerIndex, heroTargets = [], s
   return draw(afterDestroy, { playerIndex: sourcePlayerIndex, count: 1 })
 }
 
+// ─── Thief Effects ───────────────────────────────────────────────────────────
+
+/**
+ * Smooth Minimeow (059): pull 1 random card from each other player who has a
+ * Thief-class hero in their party.
+ */
+export function smoothMinimeowEffect(game, { sourcePlayerIndex }) {
+  let g = game
+  for (let i = 0; i < game.players.length; i++) {
+    if (i === sourcePlayerIndex) continue
+    const player = g.players[i]
+    const hasThief = player.partySlots.some(
+      (s) => s !== null && s.hero.class === HERO_CLASSES.THIEF,
+    )
+    if (!hasThief || player.hand.length === 0) continue
+    const card = player.hand[Math.floor(Math.random() * player.hand.length)]
+    const { game: next, error } = pull(g, { sourcePlayerIndex, targetPlayerIndex: i, instanceId: card.instanceId })
+    if (!error) g = next
+  }
+  return { game: g }
+}
+
+/**
+ * Plundering Puma (060): pull 2 cards from another player's hand.
+ * That player may then draw 1 card.
+ */
+export function plunderingPumaEffect(game, { sourcePlayerIndex, targetPlayerIndex, sourceLabel = 'Plundering Puma' }) {
+  const target = game.players[targetPlayerIndex]
+  if (!target) return { game, error: 'Invalid target.' }
+  if (target.hand.length === 0) return { game }
+  return {
+    game: {
+      ...game,
+      pendingCardPull: {
+        sourcePlayerIndex,
+        targetPlayerIndex,
+        bonusTriggerType: null,
+        sourceLabel,
+        remainingPulls: 2,
+        drawForTargetAfter: 1,
+      },
+    },
+  }
+}
+
+/**
+ * Shurikitty (061): destroy a hero. If that hero has an item equipped,
+ * the item goes to your hand instead of the discard pile.
+ */
+export function shurikittyEffect(game, { sourcePlayerIndex, heroTargets = [] }) {
+  const heroInstanceId = heroTargets[0]
+  if (!heroInstanceId) return { game }
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1) return { game }
+  if (ownerIndex === sourcePlayerIndex) return { game, error: 'Cannot target your own hero.' }
+  return destroyAndTakeItems(game, { sourcePlayerIndex, targetPlayerIndex: ownerIndex, heroInstanceId })
+}
+
+/**
+ * Meowzio (062): steal a hero, then pull 1 card from that player's hand.
+ */
+export function meowzioEffect(game, { sourcePlayerIndex, heroTargets = [], sourceLabel = 'Meowzio' }) {
+  const heroInstanceId = heroTargets[0]
+  if (!heroInstanceId) return { game }
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1) return { game }
+  if (ownerIndex === sourcePlayerIndex) return { game, error: 'Cannot target your own hero.' }
+
+  const { game: afterSteal, error } = steal(game, { sourcePlayerIndex, targetPlayerIndex: ownerIndex, heroInstanceId })
+  if (error) return { game, error }
+
+  if (afterSteal.players[ownerIndex].hand.length === 0) return { game: afterSteal }
+  return {
+    game: {
+      ...afterSteal,
+      pendingCardPull: {
+        sourcePlayerIndex,
+        targetPlayerIndex: ownerIndex,
+        bonusTriggerType: null,
+        sourceLabel,
+      },
+    },
+  }
+}
+
+/**
+ * Slippery Paws (063): pull 2 random cards from another player's hand, then
+ * add 1 to your hand (the other goes to the discard pile).
+ */
+export function slipperyPawsEffect(game, { sourcePlayerIndex, targetPlayerIndex, sourceLabel = 'Slippery Paws' }) {
+  const target = game.players[targetPlayerIndex]
+  if (!target) return { game, error: 'Invalid target.' }
+  if (target.hand.length === 0) return { game }
+
+  const count = Math.min(2, target.hand.length)
+  const available = [...target.hand]
+  const staged = []
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(Math.random() * available.length)
+    staged.push(withFaceUp(available[idx]))
+    available.splice(idx, 1)
+  }
+
+  const stagedIds = new Set(staged.map((c) => c.instanceId))
+  const newTargetHand = target.hand.filter((c) => !stagedIds.has(c.instanceId))
+  const players = game.players.map((p, i) =>
+    i === targetPlayerIndex ? { ...p, hand: newTargetHand } : p,
+  )
+  const g = { ...game, players }
+
+  if (staged.length === 1) {
+    const sourcePlayers = g.players.map((p, i) =>
+      i === sourcePlayerIndex ? { ...p, hand: [...p.hand, staged[0]] } : p,
+    )
+    return { game: { ...g, players: sourcePlayers } }
+  }
+
+  return {
+    game: {
+      ...g,
+      pendingStagedCardPick: {
+        sourcePlayerIndex,
+        sourceLabel,
+        stagedCards: staged,
+      },
+    },
+  }
+}
+
+/**
+ * Sly Pickings (064): pull 1 card from another player's hand.
+ * If that card is an item, you may play it immediately.
+ */
+export function slyPickingsEffect(game, { sourcePlayerIndex, targetPlayerIndex, sourceLabel = 'Sly Pickings' }) {
+  const target = game.players[targetPlayerIndex]
+  if (!target) return { game, error: 'Invalid target.' }
+  if (target.hand.length === 0) return { game }
+  return {
+    game: {
+      ...game,
+      pendingCardPull: {
+        sourcePlayerIndex,
+        targetPlayerIndex,
+        bonusTriggerType: null,
+        sourceLabel,
+        allowImmediateItemPlay: true,
+      },
+    },
+  }
+}
+
+/**
+ * Kit Napper (065): steal a hero.
+ */
+export function kitNapperEffect(game, { sourcePlayerIndex, heroTargets = [] }) {
+  const heroInstanceId = heroTargets[0]
+  if (!heroInstanceId) return { game }
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1) return { game }
+  if (ownerIndex === sourcePlayerIndex) return { game, error: 'Cannot target your own hero.' }
+  return steal(game, { sourcePlayerIndex, targetPlayerIndex: ownerIndex, heroInstanceId })
+}
+
+/**
+ * Silent Shadow (066): look at another player's hand and choose 1 card to take.
+ */
+export function silentShadowEffect(game, { sourcePlayerIndex, targetPlayerIndex, sourceLabel = 'Silent Shadow' }) {
+  const target = game.players[targetPlayerIndex]
+  if (!target) return { game, error: 'Invalid target.' }
+  if (target.hand.length === 0) return { game }
+  return {
+    game: {
+      ...game,
+      pendingCardPull: {
+        sourcePlayerIndex,
+        targetPlayerIndex,
+        bonusTriggerType: null,
+        sourceLabel,
+        showFaceUp: true,
+      },
+    },
+  }
+}
+
+// ─── Wizard Effects ──────────────────────────────────────────────────────────
+
+/**
+ * Snowball (067): draw 1 card. If it is a Magic card, may play it immediately then draw 1 more.
+ */
+export function snowballEffect(game, { sourcePlayerIndex, sourceLabel = 'Snowball' }) {
+  const { game: afterDraw, drawn = [] } = draw(game, { playerIndex: sourcePlayerIndex, count: 1 })
+  const drawnMagic = drawn.find((c) => c.type === CARD_TYPES.MAGIC)
+  if (!drawnMagic) return { game: afterDraw }
+  return {
+    game: {
+      ...afterDraw,
+      pendingMagicPlayChoice: {
+        sourcePlayerIndex,
+        magicCard: { ...drawnMagic, faceUp: true },
+        sourceLabel,
+        drawAfterPlay: 1,
+      },
+    },
+  }
+}
+
+/**
+ * Bun Bun (068): search the discard pile for a Magic card and add it to hand.
+ */
+export function bunBunEffect(game, { sourcePlayerIndex, sourceLabel = 'Bun Bun' }) {
+  const magicInDiscard = game.discardPile.filter((c) => c.type === CARD_TYPES.MAGIC)
+  if (magicInDiscard.length === 0) return { game }
+  const discardWithoutMagic = game.discardPile.filter((c) => c.type !== CARD_TYPES.MAGIC)
+  if (magicInDiscard.length === 1) {
+    const updatedPlayers = game.players.map((p, i) =>
+      i === sourcePlayerIndex ? { ...p, hand: [...p.hand, { ...magicInDiscard[0], faceUp: true }] } : p,
+    )
+    return { game: { ...game, players: updatedPlayers, discardPile: discardWithoutMagic } }
+  }
+  return {
+    game: {
+      ...game,
+      discardPile: discardWithoutMagic,
+      pendingStagedCardPick: {
+        sourcePlayerIndex,
+        sourceLabel,
+        stagedCards: magicInDiscard.map((c) => ({ ...c, faceUp: true })),
+        source: 'discardPile',
+      },
+    },
+  }
+}
+
+/**
+ * Wiggles (069): steal a hero, then roll to use its effect immediately.
+ */
+export function wigglesEffect(game, { sourcePlayerIndex, heroTargets = [], sourceLabel = 'Wiggles' }) {
+  const heroInstanceId = heroTargets[0]
+  if (!heroInstanceId) return { game }
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1 || ownerIndex === sourcePlayerIndex) return { game }
+
+  const heroName = game.players[ownerIndex].partySlots.find(
+    (s) => s?.hero.instanceId === heroInstanceId,
+  )?.hero.name ?? '???'
+
+  const { game: afterSteal, error } = steal(game, {
+    sourcePlayerIndex,
+    targetPlayerIndex: ownerIndex,
+    heroInstanceId,
+  })
+  if (error) return { game, error }
+
+  // Check if the stolen hero has a skill to roll for
+  const stolenSlot = afterSteal.players[sourcePlayerIndex].partySlots.find(
+    (s) => s?.hero.instanceId === heroInstanceId,
+  )
+  if (!stolenSlot?.hero.effectId) return { game: afterSteal }
+
+  return {
+    game: {
+      ...afterSteal,
+      pendingWigglesRoll: {
+        sourcePlayerIndex,
+        stolenHeroInstanceId: heroInstanceId,
+        stolenHeroName: heroName,
+      },
+    },
+  }
+}
+
+/**
+ * Spooky (070): each other player must sacrifice a hero.
+ * Builds a chain of pendingHeroSelection via afterHeroSelection.
+ */
+export function spookyEffect(game, { sourcePlayerIndex, sourceLabel = 'Spooky' }) {
+  const opponents = game.players
+    .map((_, i) => i)
+    .filter((i) => i !== sourcePlayerIndex && game.players[i].partySlots.some((s) => s !== null))
+
+  if (opponents.length === 0) return { game }
+
+  // Build chain from last to first
+  let chain = null
+  for (let i = opponents.length - 1; i >= 0; i--) {
+    chain = {
+      sourcePlayerIndex: opponents[i],
+      scope: 'own',
+      action: 'sacrifice',
+      sourceLabel,
+      afterHeroSelection: chain,
+    }
+  }
+
+  return { game: { ...game, pendingHeroSelection: chain } }
+}
+
+/**
+ * Fluffy (071): destroy 2 hero cards.
+ * First destroy via heroTargets[0]; second via chained pendingHeroSelection.
+ */
+export function fluffyEffect(game, { sourcePlayerIndex, heroTargets = [], sourceLabel = 'Fluffy' }) {
+  const heroInstanceId = heroTargets[0]
+  if (!heroInstanceId) return { game }
+
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1) return { game }
+
+  let afterFirst
+  if (ownerIndex === sourcePlayerIndex) {
+    const r = sacrifice(game, { playerIndex: ownerIndex, heroInstanceId })
+    afterFirst = r.game
+  } else {
+    const r = destroy(game, { sourcePlayerIndex, targetPlayerIndex: ownerIndex, heroInstanceId })
+    afterFirst = r.game
+  }
+
+  const anyHeroLeft = afterFirst.players.some((p) => p.partySlots.some((s) => s !== null))
+  if (!anyHeroLeft) return { game: afterFirst }
+
+  return {
+    game: {
+      ...afterFirst,
+      pendingHeroSelection: {
+        sourcePlayerIndex,
+        scope: 'any',
+        action: 'destroy',
+        sourceLabel,
+      },
+    },
+  }
+}
+
+/**
+ * Buttons (072): pull a card from another player's hand.
+ * If that card is a Magic card, may play it immediately.
+ */
+export function buttonsEffect(game, { sourcePlayerIndex, targetPlayerIndex, sourceLabel = 'Buttons' }) {
+  const target = game.players[targetPlayerIndex]
+  if (!target) return { game, error: 'Invalid target.' }
+  if (target.hand.length === 0) return { game }
+  return {
+    game: {
+      ...game,
+      pendingCardPull: {
+        sourcePlayerIndex,
+        targetPlayerIndex,
+        bonusTriggerType: null,
+        sourceLabel,
+        allowImmediateMagicPlay: true,
+      },
+    },
+  }
+}
+
+/**
+ * Whiskers (073): steal a hero card, then destroy a hero card.
+ */
+export function whiskersEffect(game, { sourcePlayerIndex, heroTargets = [], sourceLabel = 'Whiskers' }) {
+  const heroInstanceId = heroTargets[0]
+  if (!heroInstanceId) return { game }
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1 || ownerIndex === sourcePlayerIndex) return { game }
+
+  const { game: afterSteal, error } = steal(game, {
+    sourcePlayerIndex,
+    targetPlayerIndex: ownerIndex,
+    heroInstanceId,
+  })
+  if (error) return { game, error }
+
+  const anyHeroLeft = afterSteal.players.some((p) => p.partySlots.some((s) => s !== null))
+  if (!anyHeroLeft) return { game: afterSteal }
+
+  return {
+    game: {
+      ...afterSteal,
+      pendingHeroSelection: {
+        sourcePlayerIndex,
+        scope: 'any',
+        action: 'destroy',
+        sourceLabel,
+      },
+    },
+  }
+}
+
+/**
+ * Hopper (074): choose a player; that player must sacrifice a hero.
+ */
+export function hopperEffect(game, { sourcePlayerIndex, heroTargets = [], sourceLabel = 'Hopper' }) {
+  const heroInstanceId = heroTargets[0]
+  if (!heroInstanceId) return { game }
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1 || ownerIndex === sourcePlayerIndex) return { game }
+
+  return {
+    game: {
+      ...game,
+      pendingHeroSelection: {
+        sourcePlayerIndex: ownerIndex,
+        scope: 'own',
+        action: 'sacrifice',
+        sourceLabel,
+      },
+    },
+  }
+}
+
 /** @type {Record<string, (game: GameState, params: any) => { game: GameState, error?: string }>} */
 const CARD_EFFECTS = {
   peanut: peanutEffect,
@@ -803,6 +1227,22 @@ const CARD_EFFECTS = {
   quickDraw: quickDrawEffect,
   hook: hookEffect,
   seriousGrey: seriousGreyEffect,
+  snowball: snowballEffect,
+  bunBun: bunBunEffect,
+  wiggles: wigglesEffect,
+  spooky: spookyEffect,
+  fluffy: fluffyEffect,
+  buttons: buttonsEffect,
+  whiskers: whiskersEffect,
+  hopper: hopperEffect,
+  smoothMinimeow: smoothMinimeowEffect,
+  plunderingPuma: plunderingPumaEffect,
+  shurikitty: shurikittyEffect,
+  meowzio: meowzioEffect,
+  slipperyPaws: slipperyPawsEffect,
+  slyPickings: slyPickingsEffect,
+  kitNapper: kitNapperEffect,
+  silentShadow: silentShadowEffect,
 }
 
 /**

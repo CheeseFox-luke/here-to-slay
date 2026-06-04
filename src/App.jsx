@@ -65,6 +65,12 @@ import {
   isPendingBonusItemPlayActive,
   resolveBonusItemPlay,
   passBonusItemPlay,
+  isPendingMagicPlayChoiceActive,
+  confirmMagicPlayChoice,
+  declineMagicPlayChoice,
+  isPendingWigglesRollActive,
+  confirmWigglesRoll,
+  declineWigglesRoll,
   playModifierOnPendingRoll,
   restockHand,
   resolveCardPull,
@@ -266,6 +272,10 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   const topDeckPick = game.pendingTopDeckPick ?? null
   const bonusItemPlayPhase = isPendingBonusItemPlayActive(game)
   const bonusItemPlay = game.pendingBonusItemPlay ?? null
+  const magicPlayChoicePhase = isPendingMagicPlayChoiceActive(game)
+  const magicPlayChoice = game.pendingMagicPlayChoice ?? null
+  const wigglesRollPhase = isPendingWigglesRollActive(game)
+  const wigglesRoll = game.pendingWigglesRoll ?? null
   const itemSelection = game.pendingItemSelection ?? null
   const heroPlayChoice = game.pendingHeroPlayChoice
   const interruptPhase =
@@ -765,6 +775,31 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     setGame(nextGame)
   }
 
+  function handleConfirmMagicPlayChoice() {
+    const { game: nextGame, error } = confirmMagicPlayChoice(game)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
+  function handleDeclineMagicPlayChoice() {
+    const { game: nextGame, error } = declineMagicPlayChoice(game)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
+  function handleConfirmWigglesRoll() {
+    const { game: nextGame, diceRoll, error } = confirmWigglesRoll(game)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+    if (diceRoll) setDisplayRoll(diceRoll)
+  }
+
+  function handleDeclineWigglesRoll() {
+    const { game: nextGame, error } = declineWigglesRoll(game)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
   function handleHeroSkillClick(hero, partyOwnerIndex) {
     if (qiBearPhase) {
       handleToggleQiBearTarget(hero.instanceId)
@@ -1098,6 +1133,38 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
         onEquip={handleResolveBonusItemPlay}
         onPass={handlePassBonusItemPlay}
       />
+
+      {/* Magic Play Choice (Snowball / Buttons) */}
+      {magicPlayChoicePhase && magicPlayChoice !== null && magicPlayChoice.sourcePlayerIndex === mySeat && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          <p className="challenge-phase-bar__text">
+            <strong>{magicPlayChoice.sourceLabel}</strong>: You drew a Magic card —{' '}
+            <strong>{magicPlayChoice.magicCard.name}</strong>. Play it immediately
+            {(magicPlayChoice.drawAfterPlay ?? 0) > 0 ? ' and draw another card' : ''}?
+          </p>
+          <button type="button" className="game-actions__btn game-actions__btn--primary" onClick={handleConfirmMagicPlayChoice}>
+            Play it!
+          </button>
+          <button type="button" className="game-actions__btn" onClick={handleDeclineMagicPlayChoice}>
+            Keep in hand
+          </button>
+        </div>
+      )}
+
+      {/* Wiggles roll prompt */}
+      {wigglesRollPhase && wigglesRoll !== null && wigglesRoll.sourcePlayerIndex === mySeat && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          <p className="challenge-phase-bar__text">
+            <strong>Wiggles</strong>: Stolen <strong>{wigglesRoll.stolenHeroName}</strong>. Roll to use its effect immediately?
+          </p>
+          <button type="button" className="game-actions__btn game-actions__btn--primary" onClick={handleConfirmWigglesRoll}>
+            Roll for it!
+          </button>
+          <button type="button" className="game-actions__btn" onClick={handleDeclineWigglesRoll}>
+            Skip
+          </button>
+        </div>
+      )}
 
       {pendingDiscardPhase && pendingDiscard && discardingPlayer && (
         <div className="modifier-phase-bar challenge-phase-bar">
