@@ -1351,6 +1351,7 @@ export function playModifierOnPendingRoll(
       discardPile,
       pendingRoll,
       modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
@@ -1736,6 +1737,23 @@ export function confirmQiBearSelection(game, sourcePlayerIndex) {
     },
     pendingRoll,
   }
+}
+
+/**
+/**
+ * Cancel the current hero selection (destroy/steal/swap) without doing anything.
+ * @param {GameState} game
+ */
+export function cancelHeroSelection(game) {
+  return { game: { ...game, pendingHeroSelection: null } }
+}
+
+/**
+ * Cancel the pre-roll hero target selection (Bad Axe / Tipsy Tootie style) without doing anything.
+ * @param {GameState} game
+ */
+export function cancelEffectHeroTargetSelection(game) {
+  return { game: { ...game, pendingEffectHeroTargetSelection: null } }
 }
 
 /**

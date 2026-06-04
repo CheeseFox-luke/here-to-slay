@@ -61,6 +61,8 @@ import {
   resolveCardPull,
   selectEffectTarget,
   selectEffectHeroTarget,
+  cancelHeroSelection,
+  cancelEffectHeroTargetSelection,
   selectHeroForPendingAction,
   setQiBearCount,
   toggleQiBearHeroTarget,
@@ -952,12 +954,50 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       {heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection && (
         <div className="modifier-phase-bar challenge-phase-bar">
           {mySeat === game.pendingEffectHeroTargetSelection.sourcePlayerIndex ? (
-            <p className="challenge-phase-bar__text">
-              <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>: Click a hero to <strong>{heroTargetAction}</strong>.
-            </p>
+            <>
+              <p className="challenge-phase-bar__text">
+                <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>: Click a hero to <strong>{heroTargetAction}</strong>.
+              </p>
+              <button
+                type="button"
+                className="game-actions__btn"
+                onClick={() => {
+                  const { game: nextGame } = cancelEffectHeroTargetSelection(game)
+                  setGame(nextGame)
+                }}
+              >
+                Pass (no {heroTargetAction})
+              </button>
+            </>
           ) : (
             <p className="challenge-phase-bar__text">
               Waiting for <strong>{game.players[game.pendingEffectHeroTargetSelection.sourcePlayerIndex]?.name}</strong> to pick a hero to {heroTargetAction}…
+            </p>
+          )}
+        </div>
+      )}
+
+      {heroSelectionPhase && heroSelection && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          {mySeat === heroSelection.sourcePlayerIndex ? (
+            <>
+              <p className="challenge-phase-bar__text">
+                Pick a hero to <strong>{heroSelection.action}</strong>.
+              </p>
+              <button
+                type="button"
+                className="game-actions__btn"
+                onClick={() => {
+                  const { game: nextGame } = cancelHeroSelection(game)
+                  setGame(nextGame)
+                }}
+              >
+                Pass (no {heroSelection.action})
+              </button>
+            </>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{game.players[heroSelection.sourcePlayerIndex]?.name}</strong> to pick a hero to {heroSelection.action}…
             </p>
           )}
         </div>
