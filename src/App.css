@@ -268,6 +268,13 @@
   /* 与 .game-my-section max-height 同步，供操作台/后续骰子台定位 */
   --game-my-section-max-h: 45vh;
   --game-table-discard-col: 140px;
+  --game-ap-badge-size: 9.75rem;
+  /* 顶栏右上主牌堆槽（贴右缘；不与 AP 徽章对齐） */
+  --game-main-deck-corner-width: 148px;
+  --game-opponents-deck-gap: 12px;
+  --game-opponents-gap: 16px;
+  --game-opponents-pad-x: 12px;
+  --game-opponents-pad-right: 24px;
 }
 
 /* 对手条 + 牌桌区（AP 徽章在牌桌区右上、弃牌左侧） */
@@ -288,17 +295,63 @@
   overflow: hidden;
 }
 
-/* Opponents row — top */
-.game-opponents {
+/* Opponents row — 左侧收缩排列，右上留白 */
+.game-opponents-row {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 0;
+}
+
+.game-opponents {
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: calc(
+    100% - var(--game-main-deck-corner-width) - var(--game-opponents-deck-gap)
+  );
   display: flex;
   flex-wrap: nowrap;
   overflow-x: auto;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--game-opponents-gap);
+  padding: 8px var(--game-opponents-pad-right) 8px var(--game-opponents-pad-x);
+  margin-right: var(--game-opponents-deck-gap);
   background: var(--code-bg);
   border-bottom: 1px solid var(--border);
   min-height: 0;
+}
+
+/* 主牌堆贴右上角，发牌动画起点（见 #main-deck-deal-origin） */
+.game-main-deck-corner {
+  flex: 0 0 var(--game-main-deck-corner-width);
+  align-self: center;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px 0 0;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+/* 右上主牌堆：透明容器，仅卡背贴图（无米色底、无装饰层、无张数） */
+.game-main-deck-corner .deck-pile {
+  background: transparent;
+  gap: 0;
+}
+
+.game-main-deck-corner .deck-pile--main .deck-pile__stack {
+  height: auto;
+  background: transparent;
+}
+
+.game-main-deck-corner .deck-pile__layer {
+  display: none;
+}
+
+.game-main-deck-corner .deck-pile__count,
+.game-main-deck-corner .deck-pile--empty {
+  display: none;
 }
 
 /* Middle table */

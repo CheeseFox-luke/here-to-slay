@@ -1351,7 +1351,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       />
 
       <div className="game-main">
-      {/* Top: opponent panels */}
+      {/* Top: opponent panels（左侧仅占对手宽度，右上预留空白） */}
+      <div className="game-opponents-row">
       <div className="game-opponents">
         {game.players
           .map((player, playerIndex) => ({ player, playerIndex }))
@@ -1391,6 +1392,16 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
           })
         }
       </div>
+      <div className="game-main-deck-corner" id="main-deck-deal-origin">
+        <DeckPile
+          count={game.mainDeck.length}
+          backImageUrl={game.mainDeck[0]?.backImageUrl ?? CARD_BACKS.MAIN}
+          label="Main deck"
+          variant="main"
+          showCount={false}
+        />
+      </div>
+      </div>
 
       <div className="game-table-zone">
         <ApStatusBadge
@@ -1407,18 +1418,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
         {/* Left: deck piles */}
         <div className="game-table__left">
-          <section className="table-section table-section--deck">
-            <h3>Main deck</h3>
-            <DeckPile
-              count={game.mainDeck.length}
-              backImageUrl={game.mainDeck[0]?.backImageUrl ?? CARD_BACKS.MAIN}
-              label="Main deck"
-              variant="main"
-            />
-            {game.discardPile.length > 0 && (
-              <p className="deck-recycle-hint">Discard: {game.discardPile.length}</p>
-            )}
-          </section>
+          {game.discardPile.length > 0 && (
+            <p className="deck-recycle-hint">Discard: {game.discardPile.length}</p>
+          )}
           <section className="table-section table-section--deck">
             <h3>Monster deck</h3>
             <DeckPile
