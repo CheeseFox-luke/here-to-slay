@@ -1351,6 +1351,7 @@ export function playModifierOnPendingRoll(
       discardPile,
       pendingRoll,
       modifierPassedBy: [],
+      modifierStartedAt: Date.now(),
     },
     pendingRoll,
   }
