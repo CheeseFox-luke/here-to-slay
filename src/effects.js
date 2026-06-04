@@ -230,6 +230,9 @@ export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstan
   if (slot?.hero?.antiDestroy === true) {
     return { game, error: 'That hero cannot be destroyed (antiDestroy).' }
   }
+  if (game.partyAntiDestroy === targetPlayerIndex) {
+    return { game, error: "That player's party cannot be destroyed right now." }
+  }
   const { game: after, blocked } = tryDecoyDoll(game, targetPlayerIndex, heroInstanceId)
   if (blocked) return { game: after }
   return removeHeroToDiscard(after, targetPlayerIndex, heroInstanceId)
@@ -258,6 +261,9 @@ export function steal(game, { sourcePlayerIndex, targetPlayerIndex, heroInstance
   }
   if (target.partySlots[targetSlotIndex].hero.antiSteal === true) {
     return { game, error: 'That hero cannot be stolen (antiSteal).' }
+  }
+  if (game.partyAntiSteal === targetPlayerIndex) {
+    return { game, error: "That player's party cannot be stolen from right now." }
   }
   const sourceEmptyIndex = source.partySlots.findIndex((s) => s === null)
   if (sourceEmptyIndex === -1) {
@@ -548,6 +554,24 @@ export function applyAntiModifier(game) {
  */
 export function clearAntiModifier(game) {
   return { game: { ...game, antiModifier: false } }
+}
+
+/**
+ * Mark an entire player's party as protected from steal until their next turn.
+ * @param {GameState} game
+ * @param {{ playerIndex: number }} params
+ */
+export function applyPartyAntiSteal(game, { playerIndex }) {
+  return { game: { ...game, partyAntiSteal: playerIndex } }
+}
+
+/**
+ * Mark an entire player's party as protected from destroy until their next turn.
+ * @param {GameState} game
+ * @param {{ playerIndex: number }} params
+ */
+export function applyPartyAntiDestroy(game, { playerIndex }) {
+  return { game: { ...game, partyAntiDestroy: playerIndex } }
 }
 
 /**

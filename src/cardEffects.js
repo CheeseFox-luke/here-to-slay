@@ -1,5 +1,5 @@
 import { CARD_TYPES, HERO_CLASSES } from './data/cardUtils.js'
-import { destroy, draw, give, sacrifice, swapHands, swapHero } from './effects.js'
+import { applyPartyAntiDestroy, applyPartyAntiSteal, destroy, draw, give, sacrifice, swapHands, swapHero } from './effects.js'
 
 /** @typedef {import('./gameState.js').GameState} GameState */
 /** @typedef {import('./gameState.js').CardInstance} CardInstance */
@@ -473,6 +473,127 @@ export function fuzzyCheeksEffect(game, { sourcePlayerIndex, sourceLabel = 'Fuzz
   }
 }
 
+/**
+ * Calming Voice (043): protect your entire party from steal until your next turn.
+ * @param {GameState} game
+ * @param {{ sourcePlayerIndex: number }} params
+ */
+export function calmingVoiceAntiStealEffect(game, { sourcePlayerIndex }) {
+  return applyPartyAntiSteal(game, { playerIndex: sourcePlayerIndex })
+}
+
+/**
+ * Calming Voice (045): protect your entire party from destroy until your next turn.
+ * @param {GameState} game
+ * @param {{ sourcePlayerIndex: number }} params
+ */
+export function calmingVoiceAntiDestroyEffect(game, { sourcePlayerIndex }) {
+  return applyPartyAntiDestroy(game, { playerIndex: sourcePlayerIndex })
+}
+
+/**
+ * Iron Resolve (047): prevent challenges for the rest of your turn.
+ * @param {GameState} game
+ */
+export function ironResolveEffect(game) {
+  return { game: { ...game, antiChallenge: true } }
+}
+
+/**
+ * Wise Shield (044): +3 to all rolls until end of turn.
+ * @param {GameState} game
+ * @param {{ sourcePlayerIndex: number }} params
+ */
+export function wiseShieldEffect(game) {
+  return { game: { ...game, globalRollBonus: (game.globalRollBonus ?? 0) + 3 } }
+}
+
+/**
+ * Vibrant Glow (049): +5 to all rolls until end of turn.
+ * @param {GameState} game
+ */
+export function vibrantGlowEffect(game) {
+  return { game: { ...game, globalRollBonus: (game.globalRollBonus ?? 0) + 5 } }
+}
+
+/**
+ * Guiding Light (050): search the discard pile for a Hero card and add it to hand.
+ * Identical logic to Call to the Fallen; reused here as a hero effect.
+ * @param {GameState} game
+ * @param {{ sourcePlayerIndex: number }} params
+ */
+export function guidingLightEffect(game, { sourcePlayerIndex, sourceLabel = 'Guiding Light' }) {
+  const heroesInDiscard = game.discardPile.filter((c) => c.type === CARD_TYPES.HERO)
+  if (heroesInDiscard.length === 0) return { game }
+  const discardWithoutHeroes = game.discardPile.filter((c) => c.type !== CARD_TYPES.HERO)
+  if (heroesInDiscard.length === 1) {
+    const updatedPlayers = game.players.map((p, i) =>
+      i === sourcePlayerIndex ? { ...p, hand: [...p.hand, { ...heroesInDiscard[0], faceUp: true }] } : p,
+    )
+    return { game: { ...game, players: updatedPlayers, discardPile: discardWithoutHeroes } }
+  }
+  return {
+    game: {
+      ...game,
+      discardPile: discardWithoutHeroes,
+      pendingStagedCardPick: {
+        sourcePlayerIndex,
+        sourceLabel,
+        stagedCards: heroesInDiscard.map((c) => ({ ...c, faceUp: true })),
+        source: 'discardPile',
+      },
+    },
+  }
+}
+
+/**
+ * Radiant Horn (046): search the discard pile for a Modifier card and add it to hand.
+ * @param {GameState} game
+ * @param {{ sourcePlayerIndex: number }} params
+ */
+export function radiantHornEffect(game, { sourcePlayerIndex, sourceLabel = 'Radiant Horn' }) {
+  const modifiersInDiscard = game.discardPile.filter((c) => c.type === CARD_TYPES.MODIFIER)
+  if (modifiersInDiscard.length === 0) return { game }
+  const discardWithoutModifiers = game.discardPile.filter((c) => c.type !== CARD_TYPES.MODIFIER)
+  if (modifiersInDiscard.length === 1) {
+    const updatedPlayers = game.players.map((p, i) =>
+      i === sourcePlayerIndex ? { ...p, hand: [...p.hand, { ...modifiersInDiscard[0], faceUp: true }] } : p,
+    )
+    return { game: { ...game, players: updatedPlayers, discardPile: discardWithoutModifiers } }
+  }
+  return {
+    game: {
+      ...game,
+      discardPile: discardWithoutModifiers,
+      pendingStagedCardPick: {
+        sourcePlayerIndex,
+        sourceLabel,
+        stagedCards: modifiersInDiscard.map((c) => ({ ...c, faceUp: true })),
+        source: 'discardPile',
+      },
+    },
+  }
+}
+
+/**
+ * Holy Curselifter (048): open a selection for the player to pick a cursed item
+ * from their own party to return to their hand. Pass (no choose) is allowed.
+ * @param {GameState} game
+ * @param {{ sourcePlayerIndex: number }} params
+ */
+export function holyCurselifterEffect(game, { sourcePlayerIndex, sourceLabel = 'Holy Curselifter' }) {
+  const hasCursedItem = game.players[sourcePlayerIndex]?.partySlots.some(
+    (s) => s !== null && s.items.some((it) => it.type === CARD_TYPES.CURSED_ITEM),
+  )
+  if (!hasCursedItem) return { game }
+  return {
+    game: {
+      ...game,
+      pendingItemSelection: { sourcePlayerIndex, sourceLabel, kind: 'holyCurselifter' },
+    },
+  }
+}
+
 /** @type {Record<string, (game: GameState, params: any) => { game: GameState, error?: string }>} */
 const CARD_EFFECTS = {
   peanut: peanutEffect,
@@ -490,6 +611,14 @@ const CARD_EFFECTS = {
   greedyCheeks: greedyCheeksEffect,
   dodgyDealer: dodgyDealerEffect,
   fuzzyCheeks: fuzzyCheeksEffect,
+  calmingVoiceAntiSteal: calmingVoiceAntiStealEffect,
+  calmingVoiceAntiDestroy: calmingVoiceAntiDestroyEffect,
+  ironResolve: ironResolveEffect,
+  wiseShield: wiseShieldEffect,
+  vibrantGlow: vibrantGlowEffect,
+  guidingLight: guidingLightEffect,
+  radiantHorn: radiantHornEffect,
+  holyCurselifter: holyCurselifterEffect,
 }
 
 /**

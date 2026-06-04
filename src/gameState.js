@@ -315,12 +315,15 @@ export function partyHasHero(partySlots) {
  * @property {boolean} [antiModifier] - while true, no player may play a Modifier card.
  * @property {number} [globalRollBonus] - flat bonus added to every roll until end of turn.
  * @property {PendingItemSelection | null} [pendingItemSelection]
+ * @property {number | null} [partyAntiSteal] - playerIndex whose entire party cannot be stolen; cleared at start of that player's next turn.
+ * @property {number | null} [partyAntiDestroy] - playerIndex whose entire party cannot be destroyed; cleared at start of that player's next turn.
  */
 
 /**
  * @typedef {Object} PendingItemSelection
  * @property {number} sourcePlayerIndex - player who triggered the effect
  * @property {string} sourceLabel
+ * @property {string} [kind] - 'holyCurselifter' restricts selection to own cursed items
  */
 
 /**
@@ -381,6 +384,8 @@ export const initialGameState = {
   modifierPassedBy: [],
   challengeStartedAt: null,
   modifierStartedAt: null,
+  partyAntiSteal: null,
+  partyAntiDestroy: null,
 }
 
 export const RESTOCK_HAND_AP_COST = 3

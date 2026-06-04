@@ -959,6 +959,47 @@ export function resolveWindsOfChange(game, heroInstanceId, itemInstanceId) {
 }
 
 /**
+ * Holy Curselifter: return a cursed item from one of the source player's own party heroes to their hand.
+ * @param {GameState} game
+ * @param {string} heroInstanceId
+ * @param {string} itemInstanceId
+ */
+export function resolveHolyCurselifter(game, heroInstanceId, itemInstanceId) {
+  const sel = game.pendingItemSelection
+  if (!sel) return { game, error: 'No item selection pending.' }
+
+  const sourcePlayer = game.players[sel.sourcePlayerIndex]
+  const slotIndex = sourcePlayer?.partySlots.findIndex((s) => s?.hero.instanceId === heroInstanceId) ?? -1
+  if (slotIndex === -1) return { game, error: 'Hero not found in your party.' }
+
+  const slot = sourcePlayer.partySlots[slotIndex]
+  const item = slot.items.find((it) => it.instanceId === itemInstanceId)
+  if (!item) return { game, error: 'Item not found on that hero.' }
+  if (item.type !== 'CursedItem') return { game, error: 'That item is not a cursed item.' }
+
+  const newItems = slot.items.filter((it) => it.instanceId !== itemInstanceId)
+  const newSlots = sourcePlayer.partySlots.map((s, i) =>
+    i === slotIndex ? { ...s, items: newItems } : s,
+  )
+  const returnedItem = { ...item, faceUp: false }
+  const players = game.players.map((p, i) =>
+    i === sel.sourcePlayerIndex
+      ? { ...p, partySlots: newSlots, hand: [...p.hand, returnedItem] }
+      : p,
+  )
+  return { game: { ...game, players, pendingItemSelection: null } }
+}
+
+/**
+ * Pass (no choose) for item selection phases that allow it (e.g. Holy Curselifter).
+ * @param {GameState} game
+ */
+export function passItemSelection(game) {
+  if (!game.pendingItemSelection) return { game, error: 'No item selection pending.' }
+  return { game: { ...game, pendingItemSelection: null } }
+}
+
+/**
  * @param {GameState} game
  */
 export function passChallengeWindow(game, playerIndex = null) {
@@ -2311,10 +2352,15 @@ export function endTurn(game) {
     pendingDestroyTargets: [],
     globalRollBonus: 0,
     pendingItemSelection: null,
+    antiChallenge: false,
+    antiModifier: false,
     challengePassedBy: [],
     modifierPassedBy: [],
     challengeStartedAt: null,
     modifierStartedAt: null,
+    // Party protections expire when it becomes that player's turn again
+    partyAntiSteal: game.partyAntiSteal === nextIndex ? null : (game.partyAntiSteal ?? null),
+    partyAntiDestroy: game.partyAntiDestroy === nextIndex ? null : (game.partyAntiDestroy ?? null),
   }
 }
 

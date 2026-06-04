@@ -55,6 +55,8 @@ import {
   playItemOnHero,
   playCursedItemOnHero,
   resolveWindsOfChange,
+  resolveHolyCurselifter,
+  passItemSelection,
   isPendingItemSelectionActive,
   playModifierOnPendingRoll,
   restockHand,
@@ -466,7 +468,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
   function handleItemClick(hero, item) {
     if (!itemSelectionPhase) return
-    const { game: nextGame, error } = resolveWindsOfChange(game, hero.instanceId, item.instanceId)
+    const kind = itemSelection?.kind
+    const fn = kind === 'holyCurselifter' ? resolveHolyCurselifter : resolveWindsOfChange
+    const { game: nextGame, error } = fn(game, hero.instanceId, item.instanceId)
     if (error) { window.alert(error); return }
     setGame(nextGame)
   }
@@ -1090,10 +1094,26 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       {itemSelectionPhase && itemSelection && (
         <div className="modifier-phase-bar challenge-phase-bar">
           {mySeat === itemSelection.sourcePlayerIndex ? (
-            <p className="challenge-phase-bar__text">
-              Click an equipped item on any party to return it to its owner's hand
-              (<strong>{itemSelection.sourceLabel}</strong>).
-            </p>
+            <>
+              <p className="challenge-phase-bar__text">
+                {itemSelection.kind === 'holyCurselifter'
+                  ? <>Click a cursed item on your own party to return it to your hand (<strong>{itemSelection.sourceLabel}</strong>).</>
+                  : <>Click an equipped item on any party to return it to its owner's hand (<strong>{itemSelection.sourceLabel}</strong>).</>
+                }
+              </p>
+              {itemSelection.kind === 'holyCurselifter' && (
+                <button
+                  type="button"
+                  className="game-actions__btn"
+                  onClick={() => {
+                    const { game: nextGame } = passItemSelection(game)
+                    setGame(nextGame)
+                  }}
+                >
+                  Pass (no choose)
+                </button>
+              )}
+            </>
           ) : (
             <p className="challenge-phase-bar__text">
               Waiting for <strong>{game.players[itemSelection.sourcePlayerIndex]?.name}</strong> to pick an item to return…
@@ -1152,8 +1172,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
             const iAmQiBear = qiBearPhase && qiBearSel?.sourcePlayerIndex === mySeat
             // Item equip cursed: I (mySeat) equip a cursed item on an opponent hero
             const canEquipCursedHere = itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed
-            // Item selection (Winds of Change): only source player clicks items
-            const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat
+            // Item selection: only source player clicks items; Holy Curselifter restricts to own party
+            const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat && itemSelection?.kind !== 'holyCurselifter'
             return (
               <CompactPlayerPanel
                 key={player.id}
@@ -1335,8 +1355,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
             }
             pendingDestroyMode={qiBearPhase || (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))}
             pendingDestroyIds={game.pendingDestroyTargets}
-            onItemClick={itemSelectionPhase ? handleItemClick : undefined}
-            itemsSelectable={itemSelectionPhase}
+            onItemClick={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat ? handleItemClick : undefined}
+            itemsSelectable={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat}
           />
 
           {/* My hand */}

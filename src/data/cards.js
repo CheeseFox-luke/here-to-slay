@@ -161,14 +161,46 @@ export const heroCardsByClass = {
     }),
   ],
   [HERO_CLASSES.GUARDIAN]: [
-    createHeroCard('043', 'HtS-Base-043-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
-    createHeroCard('044', 'HtS-Base-044-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
-    createHeroCard('045', 'HtS-Base-045-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
-    createHeroCard('046', 'HtS-Base-046-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
-    createHeroCard('047', 'HtS-Base-047-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
-    createHeroCard('048', 'HtS-Base-048-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
-    createHeroCard('049', 'HtS-Base-049-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
-    createHeroCard('050', 'HtS-Base-050-Hero-Guardian.png', HERO_CLASSES.GUARDIAN),
+    createHeroCard('Calming Voice', 'HtS-Base-043-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+      rollRequirement: 9,
+      effectId: 'calmingVoiceAntiSteal',
+      effect: 'Hero cards in your party cannot be stolen until your next turn.',
+    }),
+    createHeroCard('Wise Shield', 'HtS-Base-044-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+      rollRequirement: 6,
+      effectId: 'wiseShield',
+      effect: '+3 to all of your rolls until the end of your turn.',
+    }),
+    createHeroCard('Calming Voice', 'HtS-Base-045-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+      rollRequirement: 8,
+      effectId: 'calmingVoiceAntiDestroy',
+      effect: 'Hero cards in your party cannot be destroyed until your next turn.',
+    }),
+    createHeroCard('Radiant Horn', 'HtS-Base-046-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+      rollRequirement: 6,
+      effectId: 'radiantHorn',
+      effect: 'Search the discard pile for a modifier card and add it to your hand.',
+    }),
+    createHeroCard('Iron Resolve', 'HtS-Base-047-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+      rollRequirement: 8,
+      effectId: 'ironResolve',
+      effect: 'Cards you played cannot be challenged for the rest of your turn.',
+    }),
+    createHeroCard('Holy Curselifter', 'HtS-Base-048-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+      rollRequirement: 5,
+      effectId: 'holyCurselifter',
+      effect: 'Return a cursed Item card equipped to a hero card in your party to your hand.',
+    }),
+    createHeroCard('Vibrant Glow', 'HtS-Base-049-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+      rollRequirement: 9,
+      effectId: 'vibrantGlow',
+      effect: '+5 to all of your rolls until the end of your turn.',
+    }),
+    createHeroCard('Guiding Light', 'HtS-Base-050-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+      rollRequirement: 7,
+      effectId: 'guidingLight',
+      effect: 'Search the discard pile for a hero card and add it to your hand.',
+    }),
   ],
   [HERO_CLASSES.RANGER]: [
     createHeroCard('051', 'HtS-Base-051-Hero-Ranger.png', HERO_CLASSES.RANGER),
