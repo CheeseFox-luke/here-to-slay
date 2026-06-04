@@ -36,4 +36,6 @@
 
 支线任务 1：操作台按钮完全不透明（hover / disabled / primary / placeholder / Debug 均用实底色，opacity:1）；操作台面板背景仍可透明。✓ App.css .action-console .game-actions__btn*
 
+支线任务 2：右上 AP 圆牌（粗框、三行：turn / x/3 / AP）；game.actionPoints；己回合仅紫色字。✓ ApStatusBadge.jsx + App.jsx + App.css
+
 4（部分）actionConsoleHelpers + ActionConsole：旧 statusContent 已删；仅 challengeAttackerWaiting + 英文无牌 cue（NO_*_CARD_HINT）。

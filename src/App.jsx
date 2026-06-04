@@ -12,6 +12,7 @@ import ModifierChoiceDialog from './components/ModifierChoiceDialog.jsx'
 import ModifierTargetDialog from './components/ModifierTargetDialog.jsx'
 import RollFeedback from './components/RollFeedback.jsx'
 import ActionConsole from './components/ActionConsole.jsx'
+import ApStatusBadge from './components/ApStatusBadge.jsx'
 import SkillConfirmDialog from './components/SkillConfirmDialog.jsx'
 import { CARD_BACKS, CARD_TYPES } from './data/cardUtils.js'
 import {
@@ -90,6 +91,7 @@ import {
   DRAW_CARD_AP_COST,
   MODIFIER_WINDOW_MS,
   RESTOCK_HAND_AP_COST,
+  INITIAL_ACTION_POINTS,
   initGame,
 } from './gameState.js'
 import { saveGameState, loadGameState } from './roomSync.js'
@@ -1348,6 +1350,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
         onChoose={handleSelectEffectTarget}
       />
 
+      <div className="game-main">
       {/* Top: opponent panels */}
       <div className="game-opponents">
         {game.players
@@ -1388,6 +1391,16 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
           })
         }
       </div>
+
+      <div className="game-table-zone">
+        <ApStatusBadge
+          actionPoints={game.actionPoints}
+          maxActionPoints={INITIAL_ACTION_POINTS}
+          turnLine={
+            isMyTurn ? 'Your turn' : `${currentPlayer?.name ?? 'Player'}'s turn`
+          }
+          isMyTurn={isMyTurn}
+        />
 
       {/* Middle: game table */}
       <div className="game-table">
@@ -1449,6 +1462,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
             }
           </section>
         </div>
+      </div>
+      </div>
       </div>
 
       {/* Bottom: my section */}

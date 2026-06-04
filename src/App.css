@@ -267,6 +267,25 @@
   position: relative;
   /* 与 .game-my-section max-height 同步，供操作台/后续骰子台定位 */
   --game-my-section-max-h: 45vh;
+  --game-table-discard-col: 140px;
+}
+
+/* 对手条 + 牌桌区（AP 徽章在牌桌区右上、弃牌左侧） */
+.game-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.game-table-zone {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Opponents row — top */
@@ -290,6 +309,7 @@
   padding: 12px;
   overflow: hidden;
   min-height: 0;
+  width: 100%;
 }
 
 .game-table__left {
@@ -312,7 +332,7 @@
 
 .game-table__right {
   flex-shrink: 0;
-  width: 140px;
+  width: var(--game-table-discard-col);
 }
 
 .table-section h3 {
