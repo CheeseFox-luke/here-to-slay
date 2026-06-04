@@ -1499,7 +1499,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
         {/* My party + hand */}
         <div className="my-section__board">
-          {/* 手牌在左；队伍面板在右（DOM 顺序须手牌在前，见 App.css） */}
+          <div className="my-section__corner" aria-hidden="true" />
+          <div className="my-section__strip">
           <div className="my-section__hand-area">
             <div className="card-row hand-row">
               {game.players[mySeat].hand.length === 0
@@ -1570,6 +1571,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
             onItemClick={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat ? handleItemClick : undefined}
             itemsSelectable={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat}
           />
+          </div>
         </div>
       </div>
     </div>

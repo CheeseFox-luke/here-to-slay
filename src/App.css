@@ -290,6 +290,10 @@
       (var(--game-opponents-max-panels) - 1) * var(--game-opponents-gap) +
       var(--game-opponents-pad-x) + var(--game-opponents-pad-right)
   );
+  --compact-leader-w: 56px;
+  --compact-panel-left-col-w: 68px;
+  /* 左下留白 = 右侧队伍 panel 整宽（居右后须在底栏左侧留出同宽空角） */
+  --game-hand-left-reserve: var(--compact-panel-w);
 }
 
 /* 对手条 + 牌桌区（AP 徽章在牌桌区右上、弃牌左侧） */
@@ -419,11 +423,12 @@
   margin: 0 0 6px;
 }
 
-/* My section — bottom（手牌/己方队伍） */
+/* My section — bottom（左下角独立留白，紫线只横跨手牌+队伍条带） */
 .game-my-section {
   flex-shrink: 0;
-  border-top: 2px solid var(--accent-border);
-  background: var(--bg);
+  box-sizing: border-box;
+  width: 100%;
+  background: transparent;
   display: flex;
   flex-direction: column;
   max-height: var(--game-my-section-max-h);
@@ -457,7 +462,7 @@
   --action-btn-debug-on-border: #c9a227;
 
   position: absolute;
-  left: 0;
+  left: var(--game-hand-left-reserve);
   right: 0;
   bottom: 100%;
   z-index: 20;
@@ -618,25 +623,50 @@
 }
 
 .my-section__board {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--game-hand-left-reserve) minmax(0, 1fr);
   flex: 1;
   overflow: hidden;
   min-height: 0;
 }
 
+/* 左下空白角（宽 = compact-panel-w）：无背景、无顶边线 */
+.my-section__corner {
+  grid-column: 1;
+  grid-row: 1;
+  pointer-events: none;
+}
+
+/* 手牌 + 队伍：整条 panel，顶边紫线仅在此 */
+.my-section__strip {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-width: 0;
+  border-top: 2px solid var(--accent-border);
+  background: var(--bg);
+}
+
 .my-section__hand-area {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
   overflow-y: auto;
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
+  background: #e5e3df;
 }
 
-/* 主视角：手牌 DOM 在前、面板在后 → 队伍贴右 */
-.my-section__board > .compact-panel--me {
+@media (prefers-color-scheme: dark) {
+  .my-section__hand-area {
+    background: #2a2b30;
+  }
+}
+
+.my-section__strip > .compact-panel--me {
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 /* Waiting screen */

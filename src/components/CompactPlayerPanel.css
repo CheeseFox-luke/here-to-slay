@@ -38,9 +38,10 @@
   --compact-panel-w: 260px;
 }
 
-/* Left section — clickable to toggle view */
+/* Left section — clickable to toggle view（宽与底栏左下留白 --compact-panel-left-col-w 一致） */
 .compact-panel__left {
-  flex-shrink: 0;
+  flex: 0 0 var(--compact-panel-left-col-w, 68px);
+  width: var(--compact-panel-left-col-w, 68px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -48,6 +49,7 @@
   cursor: pointer;
   user-select: none;
   position: relative;
+  box-sizing: border-box;
 }
 
 .compact-panel__hand-badge {
@@ -69,7 +71,7 @@
 }
 
 .compact-panel__leader-img {
-  width: 56px;
+  width: var(--compact-leader-w, 56px);
   height: auto;
   border-radius: 5px;
   display: block;
