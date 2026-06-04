@@ -1418,9 +1418,6 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
         {/* Left: deck piles */}
         <div className="game-table__left">
-          {game.discardPile.length > 0 && (
-            <p className="deck-recycle-hint">Discard: {game.discardPile.length}</p>
-          )}
           <section className="table-section table-section--deck">
             <h3>Monster deck</h3>
             <DeckPile
@@ -1451,14 +1448,16 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
         {/* Right: discard pile */}
         <div className="game-table__right">
-          <section className="table-section">
-            <h3>Discard</h3>
+          <section className="table-section table-section--discard">
+            <h3 className="table-section__title-row">
+              Discard
+              <span className="discard-pile__count">{game.discardPile.length}</span>
+            </h3>
             {game.discardPile.length === 0
               ? <p className="discard-pile__empty">Empty</p>
               : (
                 <div className="discard-pile">
                   <CardDisplay card={topDiscard} faceUp />
-                  <span className="discard-pile__count">{game.discardPile.length}</span>
                 </div>
               )
             }

@@ -239,10 +239,18 @@
   font-size: 0.9rem;
 }
 
+.table-section__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
 .discard-pile__count {
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  color: var(--text-h);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 /* =====================================================
@@ -401,12 +409,6 @@
   font-size: 0.75rem;
   color: var(--text);
   margin: 0 0 6px;
-}
-
-.deck-recycle-hint {
-  font-size: 0.75rem;
-  color: var(--text);
-  margin: 4px 0 0;
 }
 
 /* My section — bottom（手牌/己方队伍） */
