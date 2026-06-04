@@ -42,11 +42,24 @@ function RollFeedback({
   pendingRoll,
   modifierPhaseActive = false,
   challengePhaseActive = false,
-  secondsLeft,
+  secondsLeft = 0,
   attackerName = 'Attacker',
   challengerName = 'Challenger',
 }) {
   if (!pendingRoll) {
+    if (challengePhaseActive && !modifierPhaseActive) {
+      return (
+        <div
+          className="roll-feedback roll-feedback--challenge-window"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="roll-feedback__timer">
+            Opponents may play a Challenge, or Pass ({secondsLeft}s)
+          </p>
+        </div>
+      )
+    }
     return null
   }
 

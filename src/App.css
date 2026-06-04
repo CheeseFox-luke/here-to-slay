@@ -359,6 +359,20 @@
  * 不用固定 45vh，避免手牌区实际较矮时出现大空隙。
  */
 .action-console {
+  /* 支线任务 1：按钮实色变量（面板背景仍透明） */
+  --action-btn-bg: #f4f3ec;
+  --action-btn-bg-hover: #e6daf2;
+  --action-btn-bg-disabled: #e8e6e3;
+  --action-btn-text-disabled: #8a8494;
+  --action-btn-border-disabled: #d4d2dc;
+  --action-btn-bg-primary: #eadcff;
+  --action-btn-text-primary: #6b21a8;
+  --action-btn-border-primary: #aa3bff;
+  --action-btn-bg-placeholder: #ebe9e5;
+  --action-btn-debug-on-bg: #f5ecd0;
+  --action-btn-debug-on-text: #8a6d12;
+  --action-btn-debug-on-border: #c9a227;
+
   position: absolute;
   left: 0;
   right: 0;
@@ -374,7 +388,8 @@
   pointer-events: none;
 }
 
-.action-console__status,
+.action-console__attacker-wait,
+.action-console__cue,
 .action-console__toolbar,
 .action-console__actions-main,
 .action-console__actions-debug,
@@ -382,7 +397,7 @@
   pointer-events: auto;
 }
 
-.action-console__status {
+.action-console__attacker-wait {
   width: 100%;
   font-size: 0.9rem;
   margin: 0;
@@ -392,6 +407,19 @@
     0 0 8px var(--bg),
     0 1px 2px var(--bg),
     0 0 12px var(--bg);
+}
+
+/* 需求 4：无可出的 Challenge / Modifier 时红字 cue */
+.action-console__cue {
+  width: 100%;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: center;
+  color: #dc2626;
+  text-shadow:
+    0 0 8px var(--bg),
+    0 1px 2px var(--bg);
 }
 
 .action-console__toolbar {
@@ -418,9 +446,92 @@
   transform: translateY(-50%);
 }
 
+.action-console--minimal .action-console__attacker-wait {
+  text-shadow:
+    0 0 10px var(--bg),
+    0 1px 3px var(--bg),
+    0 0 14px var(--bg);
+}
+
+.action-console__actions-debug--solo {
+  position: relative;
+  right: auto;
+  top: auto;
+  transform: none;
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  margin-top: 2px;
+}
+
 .game-actions__btn--placeholder {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+@media (prefers-color-scheme: dark) {
+  .action-console {
+    --action-btn-bg: #2a2b34;
+    --action-btn-bg-hover: #3d3550;
+    --action-btn-bg-disabled: #23242c;
+    --action-btn-text-disabled: #6b7280;
+    --action-btn-border-disabled: #3a3b45;
+    --action-btn-bg-primary: #3b2d52;
+    --action-btn-text-primary: #e9d5ff;
+    --action-btn-border-primary: #c084fc;
+    --action-btn-bg-placeholder: #1f2028;
+    --action-btn-debug-on-bg: #3d3520;
+    --action-btn-debug-on-text: #e5c76b;
+    --action-btn-debug-on-border: #c9a227;
+  }
+}
+
+.action-console .game-actions__btn {
+  opacity: 1;
+  background-color: var(--action-btn-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.action-console .game-actions__btn:hover:not(:disabled) {
+  opacity: 1;
+  background-color: var(--action-btn-bg-hover);
+  border-color: var(--accent-border);
+}
+
+.action-console .game-actions__btn:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  color: var(--action-btn-text-disabled);
+  background-color: var(--action-btn-bg-disabled);
+  border-color: var(--action-btn-border-disabled);
+}
+
+.action-console .game-actions__btn--primary {
+  opacity: 1;
+  color: var(--action-btn-text-primary);
+  background-color: var(--action-btn-bg-primary);
+  border-color: var(--action-btn-border-primary);
+}
+
+.action-console .game-actions__btn--primary:hover:not(:disabled) {
+  opacity: 1;
+  background-color: var(--action-btn-bg-hover);
+  border-color: var(--action-btn-border-primary);
+  color: var(--action-btn-text-primary);
+}
+
+.action-console .game-actions__btn--placeholder:disabled {
+  opacity: 1;
+  background-color: var(--action-btn-bg-placeholder);
+  border-color: var(--action-btn-border-disabled);
+  color: var(--action-btn-text-disabled);
+}
+
+.action-console .debug-toggle--on {
+  opacity: 1;
+  color: var(--action-btn-debug-on-text);
+  background-color: var(--action-btn-debug-on-bg);
+  border-color: var(--action-btn-debug-on-border);
 }
 
 .my-section__board {

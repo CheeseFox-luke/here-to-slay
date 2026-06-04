@@ -11,6 +11,7 @@ import EffectTargetDialog from './components/EffectTargetDialog.jsx'
 import ModifierChoiceDialog from './components/ModifierChoiceDialog.jsx'
 import ModifierTargetDialog from './components/ModifierTargetDialog.jsx'
 import RollFeedback from './components/RollFeedback.jsx'
+import ActionConsole from './components/ActionConsole.jsx'
 import SkillConfirmDialog from './components/SkillConfirmDialog.jsx'
 import { CARD_BACKS, CARD_TYPES } from './data/cardUtils.js'
 import {
@@ -92,6 +93,13 @@ import {
   initGame,
 } from './gameState.js'
 import { saveGameState, loadGameState } from './roomSync.js'
+import {
+  getActionConsoleMode,
+  handHasPlayableChallenge,
+  handHasPlayableModifier,
+  NO_CHALLENGE_CARD_HINT,
+  NO_MODIFIER_CARD_HINT,
+} from './actionConsoleHelpers.js'
 import './App.css'
 
 function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
@@ -123,6 +131,10 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   const [itemEquipIsCursed, setItemEquipIsCursed] = useState(false)
   const [debugMode, setDebugMode] = useState(() => loadDebugModeEnabled())
   const [debugMessage, setDebugMessage] = useState(
+    /** @type {string | null} */ (null),
+  )
+  /** Challenge/Modify 窗：先选手牌再点操作台（需求 2 + 5） */
+  const [selectedResponseCardId, setSelectedResponseCardId] = useState(
     /** @type {string | null} */ (null),
   )
 
@@ -228,6 +240,10 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     return () => window.clearTimeout(timer)
   }, [game?.pendingRoll, displayRoll])
 
+  useEffect(() => {
+    setSelectedResponseCardId(null)
+  }, [game?.pendingChallenge, game?.pendingRoll])
+
   // — Null guard: non-host tabs show this until host saves initial game to localStorage —
   if (!game) {
     return (
@@ -316,9 +332,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     game.actionPoints >= ATTACK_MONSTER_AP_COST
   const topDiscard = game.discardPile[game.discardPile.length - 1]
   const challengeAttackerIndex = getChallengeAttackerIndex(game)
-  const challengeAttacker =
-    challengeAttackerIndex >= 0 ? game.players[challengeAttackerIndex] : null
-  const stagedCard = game.pendingChallenge?.stagedPlay?.card
+  const actionConsoleMode = getActionConsoleMode(game, mySeat)
+  const challengePassDisabled = (game.challengePassedBy ?? []).includes(mySeat)
+  const modifierPassDisabled = (game.modifierPassedBy ?? []).includes(mySeat)
 
   const rollToShow = game.pendingRoll ?? displayRoll
 
@@ -412,14 +428,22 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     }
 
     if (challengePhase) {
-      if (card.type === CARD_TYPES.CHALLENGE) {
-        handleChallengeClick(card, playerIndex)
-      }
+      if (playerIndex !== mySeat) return
+      if (card.type !== CARD_TYPES.CHALLENGE) return
+      if (!isPlayableFromHand(card, game, playerIndex)) return
+      setSelectedResponseCardId((prev) =>
+        prev === card.instanceId ? null : card.instanceId,
+      )
       return
     }
 
     if (modifierPhase) {
-      handleModifierClick(card, playerIndex)
+      if (playerIndex !== mySeat) return
+      if (card.type !== CARD_TYPES.MODIFIER) return
+      if (!isPlayableFromHand(card, game, playerIndex)) return
+      setSelectedResponseCardId((prev) =>
+        prev === card.instanceId ? null : card.instanceId,
+      )
       return
     }
 
@@ -464,6 +488,30 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     }
   }
 
+  function handleConsoleChallenge() {
+    const card = game.players[mySeat].hand.find(
+      (c) => c.instanceId === selectedResponseCardId,
+    )
+    if (!card || card.type !== CARD_TYPES.CHALLENGE) {
+      window.alert('Select a Challenge card in your hand first.')
+      return
+    }
+    handleChallengeClick(card, mySeat)
+    setSelectedResponseCardId(null)
+  }
+
+  function handleConsoleModify() {
+    const card = game.players[mySeat].hand.find(
+      (c) => c.instanceId === selectedResponseCardId,
+    )
+    if (!card || card.type !== CARD_TYPES.MODIFIER) {
+      window.alert('Select a Modifier card in your hand first.')
+      return
+    }
+    handleModifierClick(card, mySeat)
+    setSelectedResponseCardId(null)
+  }
+
   function handlePassChallenge() {
     const { game: nextGame, diceRoll, error } = passChallengeWindow(game, mySeat)
     if (error) {
@@ -471,6 +519,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
     setGame(nextGame)
+    setSelectedResponseCardId(null)
     if (diceRoll) {
       setDisplayRoll(diceRoll)
     }
@@ -600,6 +649,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   function handlePassModifier() {
     const { game: nextGame, diceRoll } = passModifierPhaseWithResult(game, mySeat)
     setGame(nextGame)
+    setSelectedResponseCardId(null)
     setModifierChoice(null)
     setModifierTargetChoice(null)
     if (diceRoll) {
@@ -870,6 +920,51 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     setSkillDialog(null)
   }
 
+  const selectedResponseCard = selectedResponseCardId
+    ? game.players[mySeat].hand.find((c) => c.instanceId === selectedResponseCardId)
+    : null
+
+  const stagedChallengeCard = game.pendingChallenge?.stagedPlay?.card
+
+  /** 操作台仅保留：Challenge 窗 attacker 等待（其余状态改到别处展示） */
+  const challengeAttackerWaiting =
+    actionConsoleMode === 'challenge-wait' ? (
+      <>
+        You played <strong>{stagedChallengeCard?.name ?? 'a card'}</strong>. Waiting for
+        opponents to Challenge or Pass…{' '}
+        <strong>({challengeSecondsLeft}s)</strong>
+      </>
+    ) : null
+
+  let missingCardHint = null
+  if (
+    actionConsoleMode === 'challenge-respond' &&
+    !challengePassDisabled &&
+    !handHasPlayableChallenge(game, mySeat)
+  ) {
+    missingCardHint = NO_CHALLENGE_CARD_HINT
+  } else if (
+    actionConsoleMode === 'modifier-respond' &&
+    !modifierPassDisabled &&
+    !handHasPlayableModifier(game, mySeat)
+  ) {
+    missingCardHint = NO_MODIFIER_CARD_HINT
+  }
+
+  const canConsoleChallenge =
+    Boolean(
+      selectedResponseCard &&
+        selectedResponseCard.type === CARD_TYPES.CHALLENGE &&
+        isPlayableFromHand(selectedResponseCard, game, mySeat),
+    ) && handHasPlayableChallenge(game, mySeat)
+
+  const canConsoleModify =
+    Boolean(
+      selectedResponseCard &&
+        selectedResponseCard.type === CARD_TYPES.MODIFIER &&
+        isPlayableFromHand(selectedResponseCard, game, mySeat),
+    ) && handHasPlayableModifier(game, mySeat)
+
   return (
     <div className="game-layout">
       {/* Victory overlay */}
@@ -894,59 +989,6 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
         attackerName={challengeAttackerName}
         challengerName={challengeChallengerName}
       />
-
-      {challengePhase && !modifierPhase && (
-        <div className="modifier-phase-bar challenge-phase-bar">
-          {mySeat === challengeAttackerIndex ? (
-            /* The player who played the card: just waits */
-            <p className="challenge-phase-bar__text">
-              You played <strong>{stagedCard?.name ?? 'a card'}</strong>.
-              Waiting for opponents to challenge or pass…
-            </p>
-          ) : (
-            /* All other players: can challenge or pass */
-            <>
-              <p className="challenge-phase-bar__text">
-                <strong>{challengeAttacker?.name ?? currentPlayer.name}</strong> played{' '}
-                <strong>{stagedCard?.name ?? 'a card'}</strong>.
-                Play a <strong>Challenge card</strong> to oppose, or Pass.
-                {(game.challengePassedBy ?? []).length > 0 && (
-                  <span className="status-warn">
-                    {' '}Passed: {(game.challengePassedBy ?? []).map((i) => game.players[i]?.name).join(', ')}
-                  </span>
-                )}
-              </p>
-              {!(game.challengePassedBy ?? []).includes(mySeat) && (
-                <button
-                  type="button"
-                  className="game-actions__btn game-actions__btn--primary"
-                  onClick={handlePassChallenge}
-                >
-                  Pass (no challenge)
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {modifierPhase && (
-        <div className="modifier-phase-bar">
-          {(game.modifierPassedBy ?? []).length > 0 && (
-            <span className="challenge-phase-bar__text">
-              Passed: {(game.modifierPassedBy ?? []).map((i) => game.players[i]?.name).join(', ')}
-            </span>
-          )}
-          <button
-            type="button"
-            className="game-actions__btn game-actions__btn--primary"
-            onClick={handlePassModifier}
-            disabled={(game.modifierPassedBy ?? []).includes(mySeat)}
-          >
-            {(game.modifierPassedBy ?? []).includes(mySeat) ? 'Passed' : 'Pass'}
-          </button>
-        </div>
-      )}
 
       {stagedCardPickPhase && stagedCardPick && (
         <div className="modifier-phase-bar challenge-phase-bar">
@@ -1411,86 +1453,29 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
       {/* Bottom: my section */}
       <div className="game-my-section">
-        {/* 操作台：锚在己方区顶边，贴手牌区；透明浮在牌桌底缘（需求 2/3.5：action-console） */}
-        <div className="action-console" role="toolbar" aria-label="Actions">
-          <p className="action-console__status">
-            Turn: <strong>{currentPlayer.name}</strong> · AP: <strong>{game.actionPoints}</strong>/3
-            {itemEquipInstanceId && (
-              <span className="status-warn">
-                {' '}— {itemEquipIsCursed
-                  ? 'Click opponent hero to equip cursed item'
-                  : 'Click your hero to equip item'}
-              </span>
-            )}
-            {challengePhase && !modifierPhase && (
-              <span className="status-warn"> — Challenge window</span>
-            )}
-            {modifierPhase && (
-              <span className="status-warn"> — Modifier window</span>
-            )}
-            {targetSelectionPhase && (
-              <span className="status-warn"> — Pick a target</span>
-            )}
-            {pendingDiscardPhase && (
-              <span className="status-warn"> — Discard {pendingDiscard?.count}</span>
-            )}
-          </p>
-          <div className="action-console__toolbar">
-            <div className="action-console__actions-main">
-              <button
-                type="button"
-                className="game-actions__btn"
-                onClick={handleDrawCard}
-                disabled={!canDraw}
-                title={`Costs ${DRAW_CARD_AP_COST} AP`}
-              >
-                Draw ({DRAW_CARD_AP_COST} AP)
-              </button>
-              <button
-                type="button"
-                className="game-actions__btn game-actions__btn--placeholder"
-                disabled
-                title="Coming soon (req 5)"
-              >
-                Play ({DRAW_CARD_AP_COST} AP)
-              </button>
-              <button
-                type="button"
-                className="game-actions__btn game-actions__btn--placeholder"
-                disabled
-                title="Coming soon"
-              >
-                Slay ({ATTACK_MONSTER_AP_COST} AP)
-              </button>
-              <button
-                type="button"
-                className="game-actions__btn"
-                onClick={handleRestockHand}
-                disabled={!canRestock}
-                title={`Costs ${RESTOCK_HAND_AP_COST} AP`}
-              >
-                {RESTOCK_HAND_ACTION_NAME} ({RESTOCK_HAND_AP_COST} AP)
-              </button>
-              <button
-                type="button"
-                className="game-actions__btn game-actions__btn--primary"
-                onClick={handleEndTurn}
-                disabled={interruptPhase || !isMyTurn || gameOver}
-              >
-                End turn
-              </button>
-            </div>
-            <div className="action-console__actions-debug">
-              <button
-                type="button"
-                className={`game-actions__btn debug-toggle${debugMode ? ' debug-toggle--on' : ''}`}
-                onClick={handleToggleDebugMode}
-              >
-                Debug {debugMode ? 'ON' : 'OFF'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ActionConsole
+          mode={actionConsoleMode}
+          challengeAttackerWaiting={challengeAttackerWaiting}
+          missingCardHint={missingCardHint}
+          debugMode={debugMode}
+          onToggleDebug={handleToggleDebugMode}
+          canDraw={canDraw}
+          canRestock={canRestock}
+          canEndTurn={!interruptPhase && isMyTurn && !gameOver}
+          restockLabel={RESTOCK_HAND_ACTION_NAME}
+          onDraw={handleDrawCard}
+          onRestock={handleRestockHand}
+          onEndTurn={handleEndTurn}
+          canConsoleChallenge={canConsoleChallenge}
+          canConsoleModify={canConsoleModify}
+          hasSelection={selectedResponseCardId !== null}
+          onConsoleChallenge={handleConsoleChallenge}
+          onConsoleModify={handleConsoleModify}
+          onPassChallenge={handlePassChallenge}
+          onPassModifierClick={handlePassModifier}
+          challengePassDisabled={challengePassDisabled}
+          modifierPassDisabled={modifierPassDisabled}
+        />
 
         {debugMode && (
           <DebugPanel onDraw={handleDebugDraw} lastMessage={debugMessage} />
@@ -1548,11 +1533,13 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
                       : challengePhase ? (mySeat !== challengeAttackerIndex && playable)
                       : isMyTurn && (itemEquipInstanceId ? itemEquipInstanceId === card.instanceId : canPlay && playable)
                     const isSelectedItem = itemEquipInstanceId === card.instanceId
+                    const isSelectedResponse =
+                      selectedResponseCardId === card.instanceId
                     return (
                       <button
                         key={card.instanceId}
                         type="button"
-                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && mySeat !== challengeAttackerIndex && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelectedItem ? ' hand-card--selected' : ''}`}
+                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && mySeat !== challengeAttackerIndex && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelectedItem || isSelectedResponse ? ' hand-card--selected' : ''}`}
                         onClick={() => {
                           if (!pendingDiscardPhase && itemEquipInstanceId && card.instanceId === itemEquipInstanceId) {
                             setItemEquipInstanceId(null); setItemEquipIsCursed(false); return

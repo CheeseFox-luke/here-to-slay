@@ -1,7 +1,7 @@
 0. hover立即放大，不要有延迟
 1. 操作居中
 2. 操作台根据状态显示，包括回合内操作，回合外操作（两种），以及无操作
-3. 布局优化
+3. 布局优化（跳过）
 3.5 留出骰子台，以及加入计数器，代替目前的文本判定提示
 4. 操作细化，包括cue，具体操作
 5. 出牌操作修正，第一次点击是选中，然后激活（出牌）按钮，点击出牌按钮才会出牌
@@ -12,5 +12,28 @@
 
 
 0✓ CardDisplay.jsx：去掉 500ms 延迟，悬停即显示放大预览。
+
 1✓ App.jsx + App.css：五项主操作居中（Draw→Play→Slay→Restock→End），Play/Slay 占位，删 Hand 提示行，Debug 靠右。
 1+ App.jsx + App.css：action-console 透明浮层；锚定 game-my-section 顶边贴手牌（修 45vh 空隙 bug）。
+
+2✓ App.jsx + ActionConsole.jsx + actionConsoleHelpers：四状态操作台；删右上 Challenge/Modify 条；手牌选中再 Challenge/Modify；attacker 等待文案在操作台。
+========== 需求 2 / 操作台 — 已确认设计（实现待你下一轮提问）==========
+【产品决定】
+- Challenge/Modify 与需求 5 合并：手牌先选中 → 再点操作台 Challenge/Modify 才真正打出（非直接点手牌出牌）。
+- Modify 阶段：全员都要能 Pass（与 gameActions.passModifierPhaseWithResult 一致）。
+- Challenge 窗：attacker 只显示「等待」，不能 Challenge 自己；其余玩家 Challenge + Pass。
+- 删除右上角 modifier-phase-bar / challenge-phase-bar，Pass 等全部迁到 action-console 固定位置。
+
+【操作台状态（当前要做 + 后续扩展）】
+- A 回合内：Draw / Play / Slay / Restock / End（仅 mySeat === currentPlayerIndex 且无其它 interrupt）
+- B 空闲：非己回合且无响应 → 操作台透明/隐藏
+- C Challenge 窗：非 attacker → Challenge + Pass；attacker → 等待（无按钮或仅文案）
+- D Modify 窗：全员 → Modify + Pass（已 Pass 则禁用）
+- ⚠️ 后续必加（本轮不做详 UI）：选英雄、弃牌、给牌、选目标、Qi Bear、staged 选牌、装备 Item 等 pending* —— 见 isInterruptPhaseActive，需单独状态，勿硬塞进 B。
+
+【已加代码】actionConsoleHelpers.js：handHasPlayableChallenge/Modifier、getPerPlayerChallengeResponse、getPerPlayerModifierResponse、getMy* — 进入 challenge/modify 时按牌局派生，供下一步接操作台。
+============================================================
+
+支线任务 1：操作台按钮完全不透明（hover / disabled / primary / placeholder / Debug 均用实底色，opacity:1）；操作台面板背景仍可透明。✓ App.css .action-console .game-actions__btn*
+
+4（部分）actionConsoleHelpers + ActionConsole：旧 statusContent 已删；仅 challengeAttackerWaiting + 英文无牌 cue（NO_*_CARD_HINT）。
