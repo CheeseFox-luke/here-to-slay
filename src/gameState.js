@@ -182,6 +182,30 @@ export function partyHasHero(partySlots) {
  * @property {boolean} [allowImmediateHeroPlay] - if true and the pulled card is
  *   a Hero, source player may play it immediately (using pendingHeroPlayChoice)
  * @property {boolean} [isBonusPull]
+ * @property {boolean} [showFaceUp] - if true, target hand is shown face-up (Sharp Fox)
+ */
+
+/**
+ * Bullseye (055): look at the top N cards of the deck.
+ * Phase 'pick': player picks 1 to add to hand.
+ * Phase 'order': player picks which of the remaining 2 goes on top (the other goes second).
+ *
+ * @typedef {Object} PendingTopDeckPick
+ * @property {number} sourcePlayerIndex
+ * @property {string} sourceLabel
+ * @property {CardInstance[]} cards - the cards currently displayed (3 in 'pick', 2 in 'order')
+ * @property {'pick' | 'order'} phase
+ */
+
+/**
+ * Quick Draw (056) / Hook (057): play an item from hand as a bonus (no AP cost).
+ * After resolving (or passing), draw `drawAfter` cards.
+ *
+ * @typedef {Object} PendingBonusItemPlay
+ * @property {number} sourcePlayerIndex
+ * @property {string} sourceLabel
+ * @property {string[] | null} eligibleInstanceIds - null means any item/cursed_item in hand
+ * @property {number} drawAfter - cards to draw after resolution
  */
 
 /**
@@ -315,6 +339,8 @@ export function partyHasHero(partySlots) {
  * @property {boolean} [antiModifier] - while true, no player may play a Modifier card.
  * @property {number} [globalRollBonus] - flat bonus added to every roll until end of turn.
  * @property {PendingItemSelection | null} [pendingItemSelection]
+ * @property {PendingTopDeckPick | null} [pendingTopDeckPick]
+ * @property {PendingBonusItemPlay | null} [pendingBonusItemPlay]
  * @property {number | null} [partyAntiSteal] - playerIndex whose entire party cannot be stolen; cleared at start of that player's next turn.
  * @property {number | null} [partyAntiDestroy] - playerIndex whose entire party cannot be destroyed; cleared at start of that player's next turn.
  */

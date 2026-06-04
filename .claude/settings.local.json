@@ -4,7 +4,8 @@
       "Bash(npm install *)",
       "mcp__Claude_in_Chrome__tabs_context_mcp",
       "Bash(npm run *)",
-      "Bash(curl -s http://localhost:5173)"
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(git add *)"
     ]
   }
 }

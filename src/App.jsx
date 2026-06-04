@@ -5,6 +5,8 @@ import CompactPlayerPanel from './components/CompactPlayerPanel.jsx'
 import DebugPanel from './components/DebugPanel.jsx'
 import DeckPile from './components/DeckPile.jsx'
 import CardPullDialog from './components/CardPullDialog.jsx'
+import TopDeckPickDialog from './components/TopDeckPickDialog.jsx'
+import BonusItemPlayDialog from './components/BonusItemPlayDialog.jsx'
 import EffectTargetDialog from './components/EffectTargetDialog.jsx'
 import ModifierChoiceDialog from './components/ModifierChoiceDialog.jsx'
 import ModifierTargetDialog from './components/ModifierTargetDialog.jsx'
@@ -58,6 +60,11 @@ import {
   resolveHolyCurselifter,
   passItemSelection,
   isPendingItemSelectionActive,
+  isPendingTopDeckPickActive,
+  resolveTopDeckPick,
+  isPendingBonusItemPlayActive,
+  resolveBonusItemPlay,
+  passBonusItemPlay,
   playModifierOnPendingRoll,
   restockHand,
   resolveCardPull,
@@ -255,6 +262,10 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   const qiBearSel = game.pendingQiBearSelection
   const heroPlayChoicePhase = isPendingHeroPlayChoiceActive(game)
   const itemSelectionPhase = isPendingItemSelectionActive(game)
+  const topDeckPickPhase = isPendingTopDeckPickActive(game)
+  const topDeckPick = game.pendingTopDeckPick ?? null
+  const bonusItemPlayPhase = isPendingBonusItemPlayActive(game)
+  const bonusItemPlay = game.pendingBonusItemPlay ?? null
   const itemSelection = game.pendingItemSelection ?? null
   const heroPlayChoice = game.pendingHeroPlayChoice
   const interruptPhase =
@@ -727,6 +738,33 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     setGame(nextGame)
   }
 
+  function handleResolveTopDeckPick(instanceId) {
+    const { game: nextGame, error } = resolveTopDeckPick(game, instanceId)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+  }
+
+  function handleResolveBonusItemPlay(itemInstanceId, heroOwnerIndex, slotIndex) {
+    const { game: nextGame, error } = resolveBonusItemPlay(game, itemInstanceId, heroOwnerIndex, slotIndex)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+  }
+
+  function handlePassBonusItemPlay() {
+    const { game: nextGame, error } = passBonusItemPlay(game)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+  }
+
   function handleHeroSkillClick(hero, partyOwnerIndex) {
     if (qiBearPhase) {
       handleToggleQiBearTarget(hero.instanceId)
@@ -1028,7 +1066,37 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               ? "If it's a Hero card, pull another one!"
               : undefined
         }
+        showFaceUp={cardPull?.showFaceUp ?? false}
         onPick={handleResolveCardPull}
+      />
+
+      <TopDeckPickDialog
+        open={topDeckPickPhase && topDeckPick !== null && topDeckPick.sourcePlayerIndex === mySeat}
+        sourceLabel={topDeckPick?.sourceLabel ?? ''}
+        phase={topDeckPick?.phase ?? 'pick'}
+        cards={topDeckPick?.cards ?? []}
+        onPick={handleResolveTopDeckPick}
+      />
+
+      <BonusItemPlayDialog
+        open={bonusItemPlayPhase && bonusItemPlay !== null && bonusItemPlay.sourcePlayerIndex === mySeat}
+        sourceLabel={bonusItemPlay?.sourceLabel ?? ''}
+        eligibleItems={
+          bonusItemPlay !== null
+            ? (() => {
+                const hand = game.players[bonusItemPlay.sourcePlayerIndex]?.hand ?? []
+                if (bonusItemPlay.eligibleInstanceIds !== null) {
+                  return hand.filter((c) => bonusItemPlay.eligibleInstanceIds.includes(c.instanceId))
+                }
+                return hand.filter((c) => c.type === CARD_TYPES.ITEM || c.type === CARD_TYPES.CURSED_ITEM)
+              })()
+            : []
+        }
+        players={game.players}
+        sourcePlayerIndex={bonusItemPlay?.sourcePlayerIndex ?? mySeat}
+        drawAfter={bonusItemPlay?.drawAfter ?? 0}
+        onEquip={handleResolveBonusItemPlay}
+        onPass={handlePassBonusItemPlay}
       />
 
       {pendingDiscardPhase && pendingDiscard && discardingPlayer && (

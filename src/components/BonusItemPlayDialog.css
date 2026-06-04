@@ -1,0 +1,114 @@
+.bonus-item-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.bonus-item-dialog {
+  max-width: min(92vw, 720px);
+  padding: 1.25rem 1.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.bonus-item-dialog__title {
+  margin: 0;
+  font-size: 1.15rem;
+  color: var(--text-h);
+}
+
+.bonus-item-dialog__desc {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.bonus-item-dialog__items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.bonus-item-dialog__item-btn {
+  padding: 2px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+}
+
+.bonus-item-dialog__item-btn:hover {
+  border-color: var(--accent-border);
+  transform: translateY(-3px);
+}
+
+.bonus-item-dialog__item-btn--selected {
+  border-color: var(--accent);
+}
+
+.bonus-item-dialog__heroes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.bonus-item-dialog__section-label {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.bonus-item-dialog__hero-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bonus-item-dialog__hero-btn {
+  padding: 4px 10px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--text);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.bonus-item-dialog__hero-btn:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-hover, rgba(255,255,255,0.05));
+}
+
+.bonus-item-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bonus-item-dialog__pass-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text);
+  transition: border-color 0.15s;
+}
+
+.bonus-item-dialog__pass-btn:hover {
+  border-color: var(--accent-border);
+}

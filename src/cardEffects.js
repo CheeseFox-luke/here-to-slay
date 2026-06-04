@@ -594,6 +594,182 @@ export function holyCurselifterEffect(game, { sourcePlayerIndex, sourceLabel = '
   }
 }
 
+// ─── Ranger Effects ──────────────────────────────────────────────────────────
+
+/**
+ * Sharp Fox (051): look at another player's hand face-up and pull one card.
+ */
+export function sharpFoxEffect(game, { sourcePlayerIndex, targetPlayerIndex, sourceLabel = 'Sharp Fox' }) {
+  const target = game.players[targetPlayerIndex]
+  if (!target) return { game, error: 'Invalid target.' }
+  if (target.hand.length === 0) return { game }
+  return {
+    game: {
+      ...game,
+      pendingCardPull: {
+        sourcePlayerIndex,
+        targetPlayerIndex,
+        bonusTriggerType: null,
+        sourceLabel,
+        showFaceUp: true,
+      },
+    },
+  }
+}
+
+/**
+ * Wildshot (052): draw 3 cards, then discard 1.
+ */
+export function wildshotEffect(game, { sourcePlayerIndex, sourceLabel = 'Wildshot' }) {
+  const { game: afterDraw } = draw(game, { playerIndex: sourcePlayerIndex, count: 3 })
+  const count = Math.min(1, afterDraw.players[sourcePlayerIndex].hand.length)
+  if (count === 0) return { game: afterDraw }
+  return {
+    game: {
+      ...afterDraw,
+      pendingDiscard: {
+        playerIndex: sourcePlayerIndex,
+        sourcePlayerIndex,
+        count,
+        sourceLabel,
+      },
+    },
+  }
+}
+
+/**
+ * Wily Red (053): draw cards until you have 7 in hand.
+ */
+export function wilyRedEffect(game, { sourcePlayerIndex }) {
+  const current = game.players[sourcePlayerIndex].hand.length
+  const needed = Math.max(0, 7 - current)
+  if (needed === 0) return { game }
+  return draw(game, { playerIndex: sourcePlayerIndex, count: needed })
+}
+
+/**
+ * Lookie Rookie (054): search the discard pile for an item (or cursed item) and add to hand.
+ */
+export function lookieRookieEffect(game, { sourcePlayerIndex, sourceLabel = 'Lookie Rookie' }) {
+  const itemsInDiscard = game.discardPile.filter(
+    (c) => c.type === CARD_TYPES.ITEM || c.type === CARD_TYPES.CURSED_ITEM,
+  )
+  if (itemsInDiscard.length === 0) return { game }
+  const discardWithoutItems = game.discardPile.filter(
+    (c) => c.type !== CARD_TYPES.ITEM && c.type !== CARD_TYPES.CURSED_ITEM,
+  )
+  if (itemsInDiscard.length === 1) {
+    const updatedPlayers = game.players.map((p, i) =>
+      i === sourcePlayerIndex ? { ...p, hand: [...p.hand, { ...itemsInDiscard[0], faceUp: true }] } : p,
+    )
+    return { game: { ...game, players: updatedPlayers, discardPile: discardWithoutItems } }
+  }
+  return {
+    game: {
+      ...game,
+      discardPile: discardWithoutItems,
+      pendingStagedCardPick: {
+        sourcePlayerIndex,
+        sourceLabel,
+        stagedCards: itemsInDiscard.map((c) => ({ ...c, faceUp: true })),
+        source: 'discardPile',
+      },
+    },
+  }
+}
+
+/**
+ * Bullseye (055): look at the top 3 cards of the deck.
+ * Add one to hand, return the other two in any order.
+ */
+export function bullseyeEffect(game, { sourcePlayerIndex, sourceLabel = 'Bullseye' }) {
+  const topCards = game.mainDeck.slice(0, 3)
+  if (topCards.length === 0) return { game }
+  const remainingDeck = game.mainDeck.slice(topCards.length)
+  return {
+    game: {
+      ...game,
+      mainDeck: remainingDeck,
+      pendingTopDeckPick: {
+        sourcePlayerIndex,
+        sourceLabel,
+        cards: topCards.map((c) => ({ ...c, faceUp: true })),
+        phase: 'pick',
+      },
+    },
+  }
+}
+
+/**
+ * Quick Draw (056): draw 2 cards.
+ * If at least one is an item/cursed item, may play one immediately.
+ */
+export function quickDrawEffect(game, { sourcePlayerIndex, sourceLabel = 'Quick Draw' }) {
+  const { game: afterDraw, drawn } = draw(game, { playerIndex: sourcePlayerIndex, count: 2 })
+  const drawnItems = drawn.filter(
+    (c) => c.type === CARD_TYPES.ITEM || c.type === CARD_TYPES.CURSED_ITEM,
+  )
+  if (drawnItems.length === 0) return { game: afterDraw }
+  return {
+    game: {
+      ...afterDraw,
+      pendingBonusItemPlay: {
+        sourcePlayerIndex,
+        sourceLabel,
+        eligibleInstanceIds: drawnItems.map((c) => c.instanceId),
+        drawAfter: 0,
+      },
+    },
+  }
+}
+
+/**
+ * Hook (057): play an item from hand immediately, then draw 1.
+ * If no item in hand, just draw 1.
+ */
+export function hookEffect(game, { sourcePlayerIndex, sourceLabel = 'Hook' }) {
+  const player = game.players[sourcePlayerIndex]
+  const hasItem = player.hand.some(
+    (c) => c.type === CARD_TYPES.ITEM || c.type === CARD_TYPES.CURSED_ITEM,
+  )
+  if (!hasItem) {
+    return draw(game, { playerIndex: sourcePlayerIndex, count: 1 })
+  }
+  return {
+    game: {
+      ...game,
+      pendingBonusItemPlay: {
+        sourcePlayerIndex,
+        sourceLabel,
+        eligibleInstanceIds: null,
+        drawAfter: 1,
+      },
+    },
+  }
+}
+
+/**
+ * Serious Grey (058): destroy a hero card, then draw 1.
+ */
+export function seriousGreyEffect(game, { sourcePlayerIndex, heroTargets = [], sourceLabel = 'Serious Grey' }) {
+  const heroInstanceId = heroTargets[0]
+  if (!heroInstanceId) return { game }
+  const ownerIndex = game.players.findIndex((p) =>
+    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+  )
+  if (ownerIndex === -1) return { game }
+
+  let afterDestroy
+  if (ownerIndex === sourcePlayerIndex) {
+    const result = sacrifice(game, { playerIndex: ownerIndex, heroInstanceId })
+    afterDestroy = result.game
+  } else {
+    const result = destroy(game, { sourcePlayerIndex, targetPlayerIndex: ownerIndex, heroInstanceId })
+    afterDestroy = result.game
+  }
+  return draw(afterDestroy, { playerIndex: sourcePlayerIndex, count: 1 })
+}
+
 /** @type {Record<string, (game: GameState, params: any) => { game: GameState, error?: string }>} */
 const CARD_EFFECTS = {
   peanut: peanutEffect,
@@ -619,6 +795,14 @@ const CARD_EFFECTS = {
   guidingLight: guidingLightEffect,
   radiantHorn: radiantHornEffect,
   holyCurselifter: holyCurselifterEffect,
+  sharpFox: sharpFoxEffect,
+  wildshot: wildshotEffect,
+  wilyRed: wilyRedEffect,
+  lookieRookie: lookieRookieEffect,
+  bullseye: bullseyeEffect,
+  quickDraw: quickDrawEffect,
+  hook: hookEffect,
+  seriousGrey: seriousGreyEffect,
 }
 
 /**

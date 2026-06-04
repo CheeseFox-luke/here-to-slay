@@ -999,6 +999,169 @@ export function passItemSelection(game) {
   return { game: { ...game, pendingItemSelection: null } }
 }
 
+// ─── Bullseye (055) ──────────────────────────────────────────────────────────
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingTopDeckPickActive(game) {
+  return (game.pendingTopDeckPick ?? null) !== null
+}
+
+/**
+ * Resolve a pick step for Bullseye.
+ * Phase 'pick': player picks 1 card to keep (goes to hand); if 2 remain → phase 'order'.
+ * Phase 'order': player picks which of the 2 remaining goes on top; the other goes second.
+ * @param {GameState} game
+ * @param {string} instanceId
+ */
+export function resolveTopDeckPick(game, instanceId) {
+  const pending = game.pendingTopDeckPick
+  if (!pending) return { game, error: 'No top-deck pick pending.' }
+
+  const cardIndex = pending.cards.findIndex((c) => c.instanceId === instanceId)
+  if (cardIndex === -1) return { game, error: 'Card not found in top-deck selection.' }
+
+  const picked = pending.cards[cardIndex]
+  const rest = pending.cards.filter((_, i) => i !== cardIndex)
+
+  if (pending.phase === 'pick') {
+    const players = game.players.map((p, i) =>
+      i === pending.sourcePlayerIndex
+        ? { ...p, hand: [...p.hand, { ...picked, faceUp: true }] }
+        : p,
+    )
+    if (rest.length === 0) {
+      return { game: { ...game, players, pendingTopDeckPick: null } }
+    }
+    if (rest.length === 1) {
+      // Only 1 card left — put it back on top, no ordering needed
+      return {
+        game: {
+          ...game,
+          players,
+          mainDeck: [{ ...rest[0], faceUp: false }, ...game.mainDeck],
+          pendingTopDeckPick: null,
+        },
+      }
+    }
+    // 2 remain — move to ordering phase
+    return {
+      game: {
+        ...game,
+        players,
+        pendingTopDeckPick: { ...pending, cards: rest, phase: 'order' },
+      },
+    }
+  }
+
+  // Phase 'order': picked card goes on top, the other goes second
+  const other = rest[0]
+  return {
+    game: {
+      ...game,
+      mainDeck: [
+        { ...picked, faceUp: false },
+        { ...other, faceUp: false },
+        ...game.mainDeck,
+      ],
+      pendingTopDeckPick: null,
+    },
+  }
+}
+
+// ─── Quick Draw (056) / Hook (057) ───────────────────────────────────────────
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingBonusItemPlayActive(game) {
+  return (game.pendingBonusItemPlay ?? null) !== null
+}
+
+/**
+ * Player picks an item from their hand to equip as a bonus (no AP cost).
+ * Moves directly to a hero in their own party (for ITEM) or an opponent hero (for CURSED_ITEM).
+ * After equipping, draws `drawAfter` cards.
+ * @param {GameState} game
+ * @param {string} itemInstanceId
+ * @param {number} heroOwnerIndex - player who owns the target hero
+ * @param {number} slotIndex - party slot to equip to
+ */
+export function resolveBonusItemPlay(game, itemInstanceId, heroOwnerIndex, slotIndex) {
+  const pending = game.pendingBonusItemPlay
+  if (!pending) return { game, error: 'No bonus item play pending.' }
+
+  const { sourcePlayerIndex } = pending
+  const player = game.players[sourcePlayerIndex]
+  const cardIndex = player.hand.findIndex((c) => c.instanceId === itemInstanceId)
+  if (cardIndex === -1) return { game, error: 'Item not found in hand.' }
+
+  const card = player.hand[cardIndex]
+  const isItem = card.type === CARD_TYPES.ITEM
+  const isCursedItem = card.type === CARD_TYPES.CURSED_ITEM
+  if (!isItem && !isCursedItem) return { game, error: 'Not an item card.' }
+
+  // Validate eligibility
+  if (pending.eligibleInstanceIds !== null && !pending.eligibleInstanceIds.includes(itemInstanceId)) {
+    return { game, error: 'That card is not eligible for this effect.' }
+  }
+
+  // Validate target
+  if (isItem && heroOwnerIndex !== sourcePlayerIndex) {
+    return { game, error: 'Regular items must be equipped to your own heroes.' }
+  }
+  if (isCursedItem && heroOwnerIndex === sourcePlayerIndex) {
+    return { game, error: 'Cursed items must be equipped to opponent heroes.' }
+  }
+
+  const targetPlayer = game.players[heroOwnerIndex]
+  const slot = targetPlayer?.partySlots[slotIndex]
+  if (!slot) return { game, error: 'No hero in that slot.' }
+
+  // Remove item from source hand
+  const newHand = player.hand.filter((_, i) => i !== cardIndex)
+  const equippedItem = { ...card, faceUp: true }
+
+  // Add item to target hero slot
+  const newSlots = targetPlayer.partySlots.map((s, i) =>
+    i === slotIndex ? { ...s, items: [...s.items, equippedItem] } : s,
+  )
+
+  let players = game.players.map((p, i) => {
+    if (i === sourcePlayerIndex && i === heroOwnerIndex) {
+      return { ...p, hand: newHand, partySlots: newSlots }
+    }
+    if (i === sourcePlayerIndex) return { ...p, hand: newHand }
+    if (i === heroOwnerIndex) return { ...p, partySlots: newSlots }
+    return p
+  })
+
+  let nextGame = { ...game, players, pendingBonusItemPlay: null }
+
+  if (pending.drawAfter > 0) {
+    const { game: afterDraw } = drawEffect(nextGame, { playerIndex: sourcePlayerIndex, count: pending.drawAfter })
+    nextGame = afterDraw
+  }
+
+  return { game: nextGame }
+}
+
+/**
+ * Pass the bonus item play (skip equipping) and draw `drawAfter` cards.
+ * @param {GameState} game
+ */
+export function passBonusItemPlay(game) {
+  const pending = game.pendingBonusItemPlay
+  if (!pending) return { game, error: 'No bonus item play pending.' }
+  let nextGame = { ...game, pendingBonusItemPlay: null }
+  if (pending.drawAfter > 0) {
+    const { game: afterDraw } = drawEffect(nextGame, { playerIndex: pending.sourcePlayerIndex, count: pending.drawAfter })
+    nextGame = afterDraw
+  }
+  return { game: nextGame }
+}
+
 /**
  * @param {GameState} game
  */
@@ -2352,6 +2515,8 @@ export function endTurn(game) {
     pendingDestroyTargets: [],
     globalRollBonus: 0,
     pendingItemSelection: null,
+    pendingTopDeckPick: null,
+    pendingBonusItemPlay: null,
     antiChallenge: false,
     antiModifier: false,
     challengePassedBy: [],

@@ -203,14 +203,49 @@ export const heroCardsByClass = {
     }),
   ],
   [HERO_CLASSES.RANGER]: [
-    createHeroCard('051', 'HtS-Base-051-Hero-Ranger.png', HERO_CLASSES.RANGER),
-    createHeroCard('052', 'HtS-Base-052-Hero-Ranger.png', HERO_CLASSES.RANGER),
-    createHeroCard('053', 'HtS-Base-053-Hero-Ranger.png', HERO_CLASSES.RANGER),
-    createHeroCard('054', 'HtS-Base-054-Hero-Ranger.png', HERO_CLASSES.RANGER),
-    createHeroCard('055', 'HtS-Base-055-Hero-Ranger.png', HERO_CLASSES.RANGER),
-    createHeroCard('056', 'HtS-Base-056-Hero-Ranger.png', HERO_CLASSES.RANGER),
-    createHeroCard('057', 'HtS-Base-057-Hero-Ranger.png', HERO_CLASSES.RANGER),
-    createHeroCard('058', 'HtS-Base-058-Hero-Ranger.png', HERO_CLASSES.RANGER),
+    createHeroCard('051', 'HtS-Base-051-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+      rollRequirement: 5,
+      targeted: true,
+      effectId: 'sharpFox',
+      effect: "Look at another player's hand and pull one card.",
+    }),
+    createHeroCard('052', 'HtS-Base-052-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+      rollRequirement: 8,
+      effectId: 'wildshot',
+      effect: 'Draw 3 cards and discard a card.',
+    }),
+    createHeroCard('053', 'HtS-Base-053-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+      rollRequirement: 10,
+      effectId: 'wilyRed',
+      effect: 'Draw cards until you have 7 cards in your hand.',
+    }),
+    createHeroCard('054', 'HtS-Base-054-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+      rollRequirement: 5,
+      effectId: 'lookieRookie',
+      effect: 'Search the discard pile for an item card and add it to your hand.',
+    }),
+    createHeroCard('055', 'HtS-Base-055-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+      rollRequirement: 7,
+      effectId: 'bullseye',
+      effect: 'Look at the top 3 cards of the deck. Add one to your hand, then return the other two to the top in any order.',
+    }),
+    createHeroCard('056', 'HtS-Base-056-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+      rollRequirement: 8,
+      effectId: 'quickDraw',
+      effect: 'Draw 2 cards. If at least one is an item card, you may play one of them immediately.',
+    }),
+    createHeroCard('057', 'HtS-Base-057-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+      rollRequirement: 6,
+      effectId: 'hook',
+      effect: 'Play an item card from your hand immediately and draw a card.',
+    }),
+    createHeroCard('058', 'HtS-Base-058-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+      rollRequirement: 9,
+      heroTargeted: true,
+      heroTargetScope: 'any',
+      effectId: 'seriousGrey',
+      effect: 'Destroy a hero card and draw a card.',
+    }),
   ],
   [HERO_CLASSES.THIEF]: [
     createHeroCard('059', 'HtS-Base-059-Hero-Thief.png', HERO_CLASSES.THIEF),
