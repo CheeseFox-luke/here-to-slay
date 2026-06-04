@@ -283,6 +283,13 @@
   --game-opponents-gap: 16px;
   --game-opponents-pad-x: 12px;
   --game-opponents-pad-right: 24px;
+  --compact-panel-w: 260px;
+  --game-opponents-max-panels: 4;
+  --game-opponents-bar-min-width: calc(
+    var(--game-opponents-max-panels) * var(--compact-panel-w) +
+      (var(--game-opponents-max-panels) - 1) * var(--game-opponents-gap) +
+      var(--game-opponents-pad-x) + var(--game-opponents-pad-right)
+  );
 }
 
 /* 对手条 + 牌桌区（AP 徽章在牌桌区右上、弃牌左侧） */
@@ -315,6 +322,7 @@
 .game-opponents {
   flex: 0 1 auto;
   width: max-content;
+  min-width: var(--game-opponents-bar-min-width);
   max-width: calc(
     100% - var(--game-main-deck-corner-width) - var(--game-opponents-deck-gap)
   );
@@ -618,10 +626,17 @@
 
 .my-section__hand-area {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
+}
+
+/* 主视角：手牌 DOM 在前、面板在后 → 队伍贴右 */
+.my-section__board > .compact-panel--me {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* Waiting screen */

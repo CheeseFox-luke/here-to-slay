@@ -209,7 +209,7 @@ function HeroGrid({
 
 function MonsterView({ slainMonsters }) {
   return (
-    <div>
+    <div className="compact-panel__monster-panel">
       <span className="compact-panel__view-label">Slain monsters</span>
       <div className="compact-panel__monster-grid">
         {Array.from({ length: SLAIN_MONSTER_SLOT_COUNT }, (_, index) => {

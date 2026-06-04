@@ -1499,39 +1499,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
         {/* My party + hand */}
         <div className="my-section__board">
-          {/* Compact panel for my party */}
-          <CompactPlayerPanel
-            player={game.players[mySeat]}
-            isCurrent={mySeat === game.currentPlayerIndex}
-            isMe={true}
-            onHeroSkillClick={(hero) => handleHeroSkillClick(hero, mySeat)}
-            heroSkillClickable={
-              (mySeat === game.currentPlayerIndex && canPlay) ||
-              (heroSelectionPhase && isPartyClickableForSelection(game, mySeat)) ||
-              (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))
-            }
-            allowHeroClickWhenSkillUsed={
-              (heroSelectionPhase && isPartyClickableForSelection(game, mySeat)) ||
-              (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))
-            }
-            onHeroEquipClick={
-              itemEquipInstanceId !== null && !heroSelectionPhase && !itemEquipIsCursed
-                ? handleHeroEquipClick
-                : undefined
-            }
-            heroEquipSelectable={itemEquipInstanceId !== null && !heroSelectionPhase && !itemEquipIsCursed}
-            selectionMode={
-              heroSelectionPhase && isPartyClickableForSelection(game, mySeat)
-                ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
-                : null
-            }
-            pendingDestroyMode={qiBearPhase || (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))}
-            pendingDestroyIds={game.pendingDestroyTargets}
-            onItemClick={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat ? handleItemClick : undefined}
-            itemsSelectable={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat}
-          />
-
-          {/* My hand */}
+          {/* 手牌在左；队伍面板在右（DOM 顺序须手牌在前，见 App.css） */}
           <div className="my-section__hand-area">
             <div className="card-row hand-row">
               {game.players[mySeat].hand.length === 0
@@ -1571,6 +1539,37 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               }
             </div>
           </div>
+
+          <CompactPlayerPanel
+            player={game.players[mySeat]}
+            isCurrent={mySeat === game.currentPlayerIndex}
+            isMe={true}
+            onHeroSkillClick={(hero) => handleHeroSkillClick(hero, mySeat)}
+            heroSkillClickable={
+              (mySeat === game.currentPlayerIndex && canPlay) ||
+              (heroSelectionPhase && isPartyClickableForSelection(game, mySeat)) ||
+              (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))
+            }
+            allowHeroClickWhenSkillUsed={
+              (heroSelectionPhase && isPartyClickableForSelection(game, mySeat)) ||
+              (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))
+            }
+            onHeroEquipClick={
+              itemEquipInstanceId !== null && !heroSelectionPhase && !itemEquipIsCursed
+                ? handleHeroEquipClick
+                : undefined
+            }
+            heroEquipSelectable={itemEquipInstanceId !== null && !heroSelectionPhase && !itemEquipIsCursed}
+            selectionMode={
+              heroSelectionPhase && isPartyClickableForSelection(game, mySeat)
+                ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
+                : null
+            }
+            pendingDestroyMode={qiBearPhase || (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))}
+            pendingDestroyIds={game.pendingDestroyTargets}
+            onItemClick={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat ? handleItemClick : undefined}
+            itemsSelectable={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat}
+          />
         </div>
       </div>
     </div>
