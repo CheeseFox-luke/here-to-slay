@@ -291,79 +291,112 @@
   --game-ap-badge-size: 9.75rem;
   /* 顶栏右上主牌堆槽（贴右缘；不与 AP 徽章对齐） */
   --game-main-deck-corner-width: 148px;
-  --game-opponents-deck-gap: 12px;
   --game-opponents-gap: 16px;
   --game-opponents-pad-x: 12px;
-  --game-opponents-pad-right: 24px;
   --compact-panel-w: 260px;
-  --game-opponents-max-panels: 4;
-  --game-opponents-bar-min-width: calc(
-    var(--game-opponents-max-panels) * var(--compact-panel-w) +
-      (var(--game-opponents-max-panels) - 1) * var(--game-opponents-gap) +
-      var(--game-opponents-pad-x) + var(--game-opponents-pad-right)
+  /* 主牌堆垂直中心 ↔ 左列首张 leader 中心 */
+  --game-leader-card-h: calc(var(--compact-leader-w) * 7 / 5);
+  --game-opponent-col-pad-top: 8px;
+  --game-panel-pad-top: 6px;
+  --game-leader-center-y: calc(
+    var(--game-opponent-col-pad-top) + var(--game-panel-pad-top) +
+      var(--game-leader-card-h) / 2
+  );
+  --game-main-deck-stack-h: 88px;
+  --game-main-deck-top: calc(
+    var(--game-leader-center-y) - var(--game-main-deck-stack-h) / 2
+  );
+  --game-main-deck-block-height: calc(
+    var(--game-main-deck-top) + var(--game-main-deck-stack-h) + 12px
+  );
+  --game-active-monsters-min-w: calc(3 * 120px + 2 * 0.5rem);
+  --game-ap-badge-right: calc(
+    var(--game-table-discard-col) + 20px + var(--compact-panel-w)
   );
   --compact-leader-w: 56px;
   --compact-panel-left-col-w: 68px;
-  /* 左下留白 = 右侧队伍 panel 整宽（居右后须在底栏左侧留出同宽空角） */
+  /* 左下留白 = 右侧队伍 panel 整宽（弃牌堆占此角，不与手牌重叠） */
   --game-hand-left-reserve: var(--compact-panel-w);
 }
 
-/* 对手条 + 牌桌区（AP 徽章在牌桌区右上、弃牌左侧） */
+/* 牌桌主区：绝对定位列（左/右对手、顶中怪物、中央留白骰子台） */
 .game-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.game-table-zone {
   flex: 1;
   position: relative;
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+.game-table-zone {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* 左侧对手列：自上而下，米色底 */
+.game-opponents-left {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  box-sizing: border-box;
+  width: calc(var(--compact-panel-w) + 2 * var(--game-opponents-pad-x));
+  padding: var(--game-opponent-col-pad-top) var(--game-opponents-pad-x) 8px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
-
-/* Opponents row — 左侧收缩排列，右上留白 */
-.game-opponents-row {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  min-height: 0;
-}
-
-.game-opponents {
-  flex: 0 1 auto;
-  width: max-content;
-  min-width: var(--game-opponents-bar-min-width);
-  max-width: calc(
-    100% - var(--game-main-deck-corner-width) - var(--game-opponents-deck-gap)
-  );
-  display: flex;
   flex-wrap: nowrap;
-  overflow-x: auto;
+  align-items: center;
   gap: var(--game-opponents-gap);
-  padding: 8px var(--game-opponents-pad-right) 8px var(--game-opponents-pad-x);
-  margin-right: var(--game-opponents-deck-gap);
   background: var(--code-bg);
-  border-bottom: 1px solid var(--border);
-  min-height: 0;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-/* 主牌堆贴右上角，发牌动画起点（见 #main-deck-deal-origin） */
+/* 右侧对手列：主牌堆下方，自上而下 */
+.game-opponents-right {
+  position: absolute;
+  top: var(--game-main-deck-block-height);
+  right: 0;
+  z-index: 10;
+  box-sizing: border-box;
+  width: calc(var(--compact-panel-w) + 2 * var(--game-opponents-pad-x));
+  padding: 8px var(--game-opponents-pad-x);
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--game-opponents-gap);
+  background: var(--code-bg);
+  max-height: calc(100% - var(--game-main-deck-block-height));
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* 对手列内：多人 panel 自上而下叠放，单 panel 仍保持 leader 左 / 英雄右 */
+.game-opponents-left > .compact-panel,
+.game-opponents-right > .compact-panel {
+  flex: 0 0 auto;
+}
+
+/* 主牌堆贴右上角；垂直中心对齐左列 leader 中心（见 --game-main-deck-top） */
 .game-main-deck-corner {
-  flex: 0 0 var(--game-main-deck-corner-width);
-  align-self: center;
-  margin-left: auto;
+  position: absolute;
+  top: var(--game-main-deck-top);
+  right: 0;
+  z-index: 12;
+  width: var(--game-main-deck-corner-width);
+  height: auto;
+  min-height: var(--game-main-deck-stack-h);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0 12px 0 0;
   box-sizing: border-box;
   background: transparent;
+  overflow: visible;
 }
 
 /* 右上主牌堆：透明容器，仅卡背贴图（无米色底、无装饰层、无张数） */
@@ -373,8 +406,15 @@
 }
 
 .game-main-deck-corner .deck-pile--main .deck-pile__stack {
-  height: auto;
+  height: var(--game-main-deck-stack-h);
   background: transparent;
+  overflow: visible;
+}
+
+.game-main-deck-corner .deck-pile--main .deck-pile__top {
+  width: 120px;
+  height: var(--game-main-deck-stack-h);
+  object-fit: cover;
 }
 
 .game-main-deck-corner .deck-pile__layer {
@@ -386,38 +426,39 @@
   display: none;
 }
 
-/* Middle table */
-.game-table {
-  flex: 1;
+/* 顶中：怪物牌堆 + 场上怪物 */
+.game-monster-zone {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
   display: flex;
-  gap: 12px;
-  padding: 12px;
-  overflow: hidden;
-  min-height: 0;
-  width: 100%;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16px;
+  width: min(
+    calc(100% - 2 * (var(--compact-panel-w) + 2 * var(--game-opponents-pad-x)) - 32px),
+    calc(var(--game-active-monsters-min-w) + 160px)
+  );
+  max-width: none;
+  pointer-events: auto;
 }
 
-.game-table__left {
+.game-monster-zone .table-section--deck {
   flex-shrink: 0;
-  width: 160px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  overflow-y: auto;
 }
 
-.game-table__center {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
+.game-monster-zone .table-section--active-monsters {
+  flex: 1 1 auto;
+  min-width: var(--game-active-monsters-min-w);
+  overflow: visible;
 }
 
-.game-table__right {
-  flex-shrink: 0;
-  width: var(--game-table-discard-col);
+.game-monster-zone .active-monsters {
+  flex-wrap: nowrap;
+  overflow-x: visible;
+  justify-content: flex-start;
 }
 
 .table-section h3 {
@@ -642,11 +683,43 @@
   min-height: 0;
 }
 
-/* 左下空白角（宽 = compact-panel-w）：无背景、无顶边线 */
+/* 左下角：弃牌堆（宽 = compact-panel-w，不与手牌条带重叠） */
 .my-section__corner {
   grid-column: 1;
   grid-row: 1;
-  pointer-events: none;
+}
+
+.my-section__corner--discard {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 8px 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.my-section__corner--discard .table-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.my-section__corner--discard .table-section h3 {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.my-section__corner--discard .card-display {
+  width: 72px;
+}
+
+.my-section__corner--discard .discard-pile__empty {
+  font-size: 0.8rem;
+  margin: 0;
 }
 
 /* 手牌 + 队伍：整条 panel，顶边紫线仅在此 */
@@ -657,6 +730,7 @@
   flex-direction: row;
   align-items: stretch;
   min-width: 0;
+  overflow: visible;
   border-top: 2px solid var(--accent-border);
   background: var(--bg);
 }
@@ -680,6 +754,7 @@
 
 .my-section__strip > .compact-panel--me {
   flex-shrink: 0;
+  overflow: visible;
 }
 
 /* Waiting screen */

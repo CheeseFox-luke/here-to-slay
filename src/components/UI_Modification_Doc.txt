@@ -2,10 +2,12 @@
 1. 操作居中
 2. 操作台根据状态显示，包括回合内操作，回合外操作（两种），以及无操作
 3. 布局优化
-3a 顶栏：对手左排 + 主牌堆右上。✓
+3a 顶栏：主牌堆右上不变；对手左列（前2人）+ 右列（主牌堆下，余下对手）。✓ App.jsx + App.css
 3b 底栏：己方 leader/英雄槽居右。✓ App.css
-3c 面板固定 party 尺寸；对手栏 min-width=4 人。✓
-3d 底栏左下留白 = compact-panel-w（260px），与右侧队伍 panel 对称。✓ App.css
+3c 面板固定 party 尺寸（260px）；对手纵列米色底 + gap。✓
+3d 底栏左下 = 弃牌堆（缩略展示，与手牌不重叠）。✓ App.jsx + App.css
+3f 顶中：怪物牌堆 + 场上怪物并排居中。✓ App.jsx + App.css
+3g 中央留白骰子台；AP 徽章左移一 panel 宽（y=50dvh）。✓ ApStatusBadge.css
 3e leader 手牌数角标：左上、圆角长方（仿小卡）。✓ CompactPlayerPanel.css
 3.5 留出骰子台，以及加入计数器，代替目前的文本判定提示
 4. 操作细化，包括cue，具体操作

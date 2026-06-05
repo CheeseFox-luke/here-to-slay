@@ -61,11 +61,11 @@ function CompactPlayerPanel({
         tabIndex={0}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setShowMonsters((v) => !v) }}
       >
-        {handCount > 0 && (
-          <span className="compact-panel__hand-badge">{handCount}</span>
-        )}
         {player.leader?.imageUrl && (
           <div className="compact-panel__leader-preview">
+            {handCount > 0 && (
+              <span className="compact-panel__hand-badge">{handCount}</span>
+            )}
             <CardDisplay
               card={player.leader}
               faceUp={player.leader.faceUp ?? true}
