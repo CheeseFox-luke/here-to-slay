@@ -75,11 +75,38 @@
   z-index: 1;
 }
 
-.compact-panel__leader-img {
-  width: var(--compact-leader-w, 56px);
-  height: auto;
+.compact-panel__leader-preview {
+  display: inline-block;
+  line-height: 0;
   border-radius: 5px;
-  display: block;
+  transition: transform 0.15s ease;
+  transform-origin: center center;
+  position: relative;
+  z-index: 1;
+}
+
+.compact-panel__leader-preview:hover {
+  transform: scale(1.12);
+  z-index: 6;
+}
+
+.compact-panel__leader-preview .card-display {
+  width: var(--compact-leader-w, 56px);
+  border-radius: 5px;
+}
+
+.compact-panel__hero-card {
+  display: inline-block;
+  line-height: 0;
+}
+
+.compact-panel__hero-card .card-display {
+  width: var(--compact-party-cell-w, 36px);
+  border-radius: 4px;
+}
+
+.compact-panel__hero-card--used .card-display {
+  opacity: 0.5;
 }
 
 .compact-panel__name {
@@ -120,9 +147,11 @@
 /* Hero grid */
 .compact-panel__hero-grid {
   display: grid;
-  grid-template-columns: repeat(var(--compact-party-cols), var(--compact-party-cell-w));
+  grid-template-columns: repeat(var(--compact-party-cols), max-content);
   gap: var(--compact-party-gap);
   align-content: start;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .compact-panel__hero-cell {
@@ -130,6 +159,7 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  min-width: var(--compact-party-cell-w);
 }
 
 .compact-panel__hero-cell--btn {
@@ -145,29 +175,61 @@
   transition: outline 0.1s;
 }
 
+/* 英雄 + 装备并列；悬停时整组放大，各自仍可 CardDisplay 大图预览 */
+.compact-panel__hero-stack {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 0;
+  transition: transform 0.15s ease;
+  transform-origin: center top;
+  position: relative;
+  z-index: 1;
+}
+
+.compact-panel__hero-cell:hover .compact-panel__hero-stack,
+.compact-panel__hero-cell--btn:hover .compact-panel__hero-stack {
+  transform: scale(1.1);
+  z-index: 8;
+}
+
+.compact-panel__hero-stack--has-items .compact-panel__hero-card .card-display {
+  width: 30px;
+}
+
 .compact-panel__hero-cell--btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.compact-panel__hero-cell--btn:hover .compact-panel__hero-img {
-  opacity: 0.85;
+.compact-panel__item-card {
+  display: inline-block;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.compact-panel__item-card .card-display {
+  width: 22px;
+  border-radius: 3px;
+}
+
+.compact-panel__item-card--btn {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.compact-panel__item-card--btn:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 1px;
 }
 
 .compact-panel__hero-cell--destroy {
   outline: 2px solid #ef4444;
   border-radius: 4px;
-}
-
-.compact-panel__hero-img {
-  width: var(--compact-party-cell-w);
-  height: auto;
-  border-radius: 4px;
-  display: block;
-}
-
-.compact-panel__hero-img--used {
-  opacity: 0.5;
 }
 
 .compact-panel__hero-placeholder {
@@ -181,20 +243,6 @@
   font-size: 0.55rem;
   color: #22c55e;
   line-height: 1;
-}
-
-.compact-panel__item-dots {
-  display: flex;
-  gap: 2px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.compact-panel__item-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
 }
 
 /* Monster view — 占满与 party 相同的宽高区域 */

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import CardDisplay from './CardDisplay.jsx'
 import { PARTY_SLOT_COUNT, SLAIN_MONSTER_SLOT_COUNT } from '../gameState.js'
 import './CompactPlayerPanel.css'
 
@@ -64,12 +65,12 @@ function CompactPlayerPanel({
           <span className="compact-panel__hand-badge">{handCount}</span>
         )}
         {player.leader?.imageUrl && (
-          <img
-            src={player.leader.imageUrl}
-            alt={player.leader.name}
-            className="compact-panel__leader-img"
-            draggable={false}
-          />
+          <div className="compact-panel__leader-preview">
+            <CardDisplay
+              card={player.leader}
+              faceUp={player.leader.faceUp ?? true}
+            />
+          </div>
         )}
         <span className="compact-panel__name">{player.name}</span>
         <span className="compact-panel__toggle-hint">
@@ -149,35 +150,45 @@ function HeroGrid({
           }
         }
 
-        const imgClass = `compact-panel__hero-img${skillUsed && !allowHeroClickWhenSkillUsed ? ' compact-panel__hero-img--used' : ''}`
+        const heroCardClass = `compact-panel__hero-card${
+          skillUsed && !allowHeroClickWhenSkillUsed
+            ? ' compact-panel__hero-card--used'
+            : ''
+        }`
+        const hasItems = slot.items.length > 0
+        const stackClass = `compact-panel__hero-stack${
+          hasItems ? ' compact-panel__hero-stack--has-items' : ''
+        }`
 
         const inner = (
           <>
-            <img
-              src={hero.imageUrl}
-              alt={hero.name}
-              className={imgClass}
-              draggable={false}
-            />
+            <div className={stackClass}>
+              <span className={heroCardClass}>
+                <CardDisplay card={hero} faceUp={hero.faceUp ?? true} />
+              </span>
+              {slot.items.map((item) =>
+                itemsSelectable && onItemClick ? (
+                  <button
+                    key={item.instanceId}
+                    type="button"
+                    className="compact-panel__item-card compact-panel__item-card--btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onItemClick(hero, item)
+                    }}
+                    title={item.name}
+                  >
+                    <CardDisplay card={item} faceUp={item.faceUp ?? true} />
+                  </button>
+                ) : (
+                  <span key={item.instanceId} className="compact-panel__item-card">
+                    <CardDisplay card={item} faceUp={item.faceUp ?? true} />
+                  </span>
+                ),
+              )}
+            </div>
             {skillUsed && (
               <span className="compact-panel__skill-check">✓</span>
-            )}
-            {slot.items.length > 0 && (
-              <div className="compact-panel__item-dots">
-                {slot.items.map((item) => (
-                  <span
-                    key={item.instanceId}
-                    className="compact-panel__item-dot"
-                    title={item.name}
-                    onClick={
-                      itemsSelectable && onItemClick
-                        ? (e) => { e.stopPropagation(); onItemClick(hero, item) }
-                        : undefined
-                    }
-                    style={itemsSelectable && onItemClick ? { cursor: 'pointer' } : undefined}
-                  />
-                ))}
-              </div>
             )}
           </>
         )

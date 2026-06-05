@@ -16,6 +16,7 @@
 
 
 0✓ CardDisplay.jsx：去掉 500ms 延迟，悬停即显示放大预览。
+0+ CompactPlayerPanel：leader/英雄 CardDisplay；装备并列小卡；hover 整组放大。✓
 
 1✓ App.jsx + App.css：五项主操作居中（Draw→Play→Slay→Restock→End），Play/Slay 占位，删 Hand 提示行，Debug 靠右。
 1+ App.jsx + App.css：action-console 透明浮层；锚定 game-my-section 顶边贴手牌（修 45vh 空隙 bug）。
