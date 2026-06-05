@@ -21,6 +21,8 @@ import {
  *   onDraw: () => void
  *   onRestock: () => void
  *   onEndTurn: () => void
+ *   canPlayCard: boolean
+ *   onPlayCard: () => void
  *   canConsoleChallenge: boolean
  *   canConsoleModify: boolean
  *   hasSelection: boolean
@@ -45,6 +47,8 @@ export default function ActionConsole({
   onDraw,
   onRestock,
   onEndTurn,
+  canPlayCard,
+  onPlayCard,
   canConsoleChallenge,
   canConsoleModify,
   hasSelection,
@@ -101,9 +105,14 @@ export default function ActionConsole({
                 </button>
                 <button
                   type="button"
-                  className="game-actions__btn game-actions__btn--placeholder"
-                  disabled
-                  title="Coming soon (req 5)"
+                  className="game-actions__btn game-actions__btn--primary"
+                  onClick={onPlayCard}
+                  disabled={!canPlayCard}
+                  title={
+                    canPlayCard
+                      ? 'Play selected card'
+                      : 'Select a card in your hand first'
+                  }
                 >
                   Play ({DRAW_CARD_AP_COST} AP)
                 </button>

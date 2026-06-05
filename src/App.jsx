@@ -135,8 +135,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   const [debugMessage, setDebugMessage] = useState(
     /** @type {string | null} */ (null),
   )
-  /** Challenge/Modify 窗：先选手牌再点操作台（需求 2 + 5） */
-  const [selectedResponseCardId, setSelectedResponseCardId] = useState(
+  /** 需求 5：手牌先选中，再点 Play / Challenge / Modify 才真正打出 */
+  const [selectedHandCardId, setSelectedHandCardId] = useState(
     /** @type {string | null} */ (null),
   )
 
@@ -243,8 +243,14 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   }, [game?.pendingRoll, displayRoll])
 
   useEffect(() => {
-    setSelectedResponseCardId(null)
+    setSelectedHandCardId(null)
   }, [game?.pendingChallenge, game?.pendingRoll])
+
+  useEffect(() => {
+    setSelectedHandCardId(null)
+    setItemEquipInstanceId(null)
+    setItemEquipIsCursed(false)
+  }, [game?.currentPlayerIndex])
 
   // — Null guard: non-host tabs show this until host saves initial game to localStorage —
   if (!game) {
@@ -367,7 +373,17 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     : null
 
 
-  function handlePlayCard(card, playerIndex) {
+  function toggleHandCardSelection(card, playerIndex) {
+    if (!isPlayableFromHand(card, game, playerIndex)) {
+      return
+    }
+    setSelectedHandCardId((prev) =>
+      prev === card.instanceId ? null : card.instanceId,
+    )
+  }
+
+  /** 特殊阶段仍直接打出；回合内 / Challenge / Modify 仅选中 */
+  function handleHandCardClick(card, playerIndex) {
     if (heroFromHandPlayPhase && heroFromHandPlay) {
       if (playerIndex !== heroFromHandPlay.sourcePlayerIndex) {
         return
@@ -429,23 +445,25 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
 
+    if (itemEquipInstanceId) {
+      if (card.instanceId === itemEquipInstanceId) {
+        setItemEquipInstanceId(null)
+        setItemEquipIsCursed(false)
+      }
+      return
+    }
+
     if (challengePhase) {
       if (playerIndex !== mySeat) return
       if (card.type !== CARD_TYPES.CHALLENGE) return
-      if (!isPlayableFromHand(card, game, playerIndex)) return
-      setSelectedResponseCardId((prev) =>
-        prev === card.instanceId ? null : card.instanceId,
-      )
+      toggleHandCardSelection(card, playerIndex)
       return
     }
 
     if (modifierPhase) {
       if (playerIndex !== mySeat) return
       if (card.type !== CARD_TYPES.MODIFIER) return
-      if (!isPlayableFromHand(card, game, playerIndex)) return
-      setSelectedResponseCardId((prev) =>
-        prev === card.instanceId ? null : card.instanceId,
-      )
+      toggleHandCardSelection(card, playerIndex)
       return
     }
 
@@ -453,15 +471,37 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
 
+    if (interruptPhase || game.actionPoints <= 0 || gameOver) {
+      return
+    }
+
+    toggleHandCardSelection(card, playerIndex)
+  }
+
+  function handleConsolePlay() {
+    const card = game.players[mySeat].hand.find(
+      (c) => c.instanceId === selectedHandCardId,
+    )
+    if (!card) {
+      window.alert('Select a card in your hand first.')
+      return
+    }
+    if (!isPlayableFromHand(card, game, mySeat)) {
+      window.alert('Cannot play this card now.')
+      return
+    }
+
     if (card.type === CARD_TYPES.ITEM) {
       setItemEquipInstanceId(card.instanceId)
       setItemEquipIsCursed(false)
+      setSelectedHandCardId(null)
       return
     }
 
     if (card.type === CARD_TYPES.CURSED_ITEM) {
       setItemEquipInstanceId(card.instanceId)
       setItemEquipIsCursed(true)
+      setSelectedHandCardId(null)
       return
     }
 
@@ -471,7 +511,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
     setGame(nextGame)
+    setSelectedHandCardId(null)
     setItemEquipInstanceId(null)
+    setItemEquipIsCursed(false)
   }
 
   function handleChallengeClick(card, playerIndex) {
@@ -492,26 +534,26 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
   function handleConsoleChallenge() {
     const card = game.players[mySeat].hand.find(
-      (c) => c.instanceId === selectedResponseCardId,
+      (c) => c.instanceId === selectedHandCardId,
     )
     if (!card || card.type !== CARD_TYPES.CHALLENGE) {
       window.alert('Select a Challenge card in your hand first.')
       return
     }
     handleChallengeClick(card, mySeat)
-    setSelectedResponseCardId(null)
+    setSelectedHandCardId(null)
   }
 
   function handleConsoleModify() {
     const card = game.players[mySeat].hand.find(
-      (c) => c.instanceId === selectedResponseCardId,
+      (c) => c.instanceId === selectedHandCardId,
     )
     if (!card || card.type !== CARD_TYPES.MODIFIER) {
       window.alert('Select a Modifier card in your hand first.')
       return
     }
     handleModifierClick(card, mySeat)
-    setSelectedResponseCardId(null)
+    setSelectedHandCardId(null)
   }
 
   function handlePassChallenge() {
@@ -521,7 +563,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
     setGame(nextGame)
-    setSelectedResponseCardId(null)
+    setSelectedHandCardId(null)
     if (diceRoll) {
       setDisplayRoll(diceRoll)
     }
@@ -651,7 +693,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   function handlePassModifier() {
     const { game: nextGame, diceRoll } = passModifierPhaseWithResult(game, mySeat)
     setGame(nextGame)
-    setSelectedResponseCardId(null)
+    setSelectedHandCardId(null)
     setModifierChoice(null)
     setModifierTargetChoice(null)
     if (diceRoll) {
@@ -922,8 +964,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     setSkillDialog(null)
   }
 
-  const selectedResponseCard = selectedResponseCardId
-    ? game.players[mySeat].hand.find((c) => c.instanceId === selectedResponseCardId)
+  const selectedHandCard = selectedHandCardId
+    ? game.players[mySeat].hand.find((c) => c.instanceId === selectedHandCardId)
     : null
 
   const stagedChallengeCard = game.pendingChallenge?.stagedPlay?.card
@@ -953,18 +995,30 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     missingCardHint = NO_MODIFIER_CARD_HINT
   }
 
+  const canConsolePlay =
+    actionConsoleMode === 'turn' &&
+    Boolean(
+      selectedHandCard &&
+        isPlayableFromHand(selectedHandCard, game, mySeat),
+    ) &&
+    isMyTurn &&
+    game.actionPoints > 0 &&
+    !interruptPhase &&
+    !itemEquipInstanceId &&
+    !gameOver
+
   const canConsoleChallenge =
     Boolean(
-      selectedResponseCard &&
-        selectedResponseCard.type === CARD_TYPES.CHALLENGE &&
-        isPlayableFromHand(selectedResponseCard, game, mySeat),
+      selectedHandCard &&
+        selectedHandCard.type === CARD_TYPES.CHALLENGE &&
+        isPlayableFromHand(selectedHandCard, game, mySeat),
     ) && handHasPlayableChallenge(game, mySeat)
 
   const canConsoleModify =
     Boolean(
-      selectedResponseCard &&
-        selectedResponseCard.type === CARD_TYPES.MODIFIER &&
-        isPlayableFromHand(selectedResponseCard, game, mySeat),
+      selectedHandCard &&
+        selectedHandCard.type === CARD_TYPES.MODIFIER &&
+        isPlayableFromHand(selectedHandCard, game, mySeat),
     ) && handHasPlayableModifier(game, mySeat)
 
   return (
@@ -1482,9 +1536,11 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
           onDraw={handleDrawCard}
           onRestock={handleRestockHand}
           onEndTurn={handleEndTurn}
+          canPlayCard={canConsolePlay}
+          onPlayCard={handleConsolePlay}
           canConsoleChallenge={canConsoleChallenge}
           canConsoleModify={canConsoleModify}
-          hasSelection={selectedResponseCardId !== null}
+          hasSelection={selectedHandCardId !== null}
           onConsoleChallenge={handleConsoleChallenge}
           onConsoleModify={handleConsoleModify}
           onPassChallenge={handlePassChallenge}
@@ -1513,25 +1569,23 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
                       : heroFromHandPlayPhase ? playable
                       : heroTargetSelectionPhase ? false
                       : targetSelectionPhase ? false
-                      : modifierPhase ? playable
-                      // During challenge phase: only non-attackers can play challenge cards
-                      : challengePhase ? (mySeat !== challengeAttackerIndex && playable)
-                      : isMyTurn && (itemEquipInstanceId ? itemEquipInstanceId === card.instanceId : canPlay && playable)
-                    const isSelectedItem = itemEquipInstanceId === card.instanceId
-                    const isSelectedResponse =
-                      selectedResponseCardId === card.instanceId
+                      : modifierPhase
+                      ? playable && card.type === CARD_TYPES.MODIFIER
+                      : challengePhase
+                      ? mySeat !== challengeAttackerIndex && playable && card.type === CARD_TYPES.CHALLENGE
+                      : itemEquipInstanceId
+                      ? card.instanceId === itemEquipInstanceId
+                      : isMyTurn && !interruptPhase && game.actionPoints > 0 && !gameOver && playable
+                    const isSelected =
+                      selectedHandCardId === card.instanceId ||
+                      itemEquipInstanceId === card.instanceId
                     return (
                       <button
                         key={card.instanceId}
                         type="button"
-                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && mySeat !== challengeAttackerIndex && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelectedItem || isSelectedResponse ? ' hand-card--selected' : ''}`}
-                        onClick={() => {
-                          if (!pendingDiscardPhase && itemEquipInstanceId && card.instanceId === itemEquipInstanceId) {
-                            setItemEquipInstanceId(null); setItemEquipIsCursed(false); return
-                          }
-                          handlePlayCard(card, mySeat)
-                        }}
-                        disabled={!enabled && !isSelectedItem}
+                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && mySeat !== challengeAttackerIndex && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelected ? ' hand-card--selected' : ''}`}
+                        onClick={() => handleHandCardClick(card, mySeat)}
+                        disabled={!enabled && !isSelected}
                       >
                         <CardDisplay card={card} faceUp={card.faceUp ?? true} />
                       </button>
