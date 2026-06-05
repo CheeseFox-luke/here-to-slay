@@ -6,6 +6,7 @@
 3b 底栏：己方 leader/英雄槽居右。✓ App.css
 3c 面板固定 party 尺寸；对手栏 min-width=4 人。✓
 3d 底栏左下留白 = compact-panel-w（260px），与右侧队伍 panel 对称。✓ App.css
+3e leader 手牌数角标：左上、圆角长方（仿小卡）。✓ CompactPlayerPanel.css
 3.5 留出骰子台，以及加入计数器，代替目前的文本判定提示
 4. 操作细化，包括cue，具体操作
 5. 出牌操作修正，第一次点击是选中，然后激活（出牌）按钮，点击出牌按钮才会出牌
