@@ -1,0 +1,81 @@
+/**
+ * 位置：game-table-zone 内绝对定位，弃牌堆列左侧、对手条下方（见 App.css）。
+ * 透明底 + 灰/紫圆环；尺寸约为初版的 1.5×。
+ */
+.ap-status-badge {
+  --ap-badge-ring: #d6d6da;
+  --ap-badge-ink: #b8b8c0;
+  --ap-badge-ink-strong: #a3a3ab;
+
+  position: fixed;
+  top: 50dvh;
+  right: calc(var(--game-table-discard-col, 140px) + 20px);
+  transform: translateY(-50%);
+  z-index: 15;
+  width: 9.75rem;
+  height: 9.75rem;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  padding: 0.6rem;
+  box-sizing: border-box;
+  background: transparent;
+  border: 6px solid var(--ap-badge-ring);
+  box-shadow: none;
+  pointer-events: none;
+  user-select: none;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.ap-status-badge__turn {
+  font-size: 0.87rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--ap-badge-ink);
+  text-transform: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.2rem;
+}
+
+.ap-status-badge__value {
+  font-size: 2.175rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: var(--ap-badge-ink-strong);
+  letter-spacing: -0.02em;
+}
+
+.ap-status-badge__label {
+  font-size: 0.93rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--ap-badge-ink);
+  text-transform: uppercase;
+}
+
+.ap-status-badge--my-turn {
+  --ap-badge-ring: color-mix(in srgb, var(--accent) 58%, #b8b8c0 42%);
+  --ap-badge-ink: color-mix(in srgb, var(--accent) 58%, #b8b8c0 42%);
+  --ap-badge-ink-strong: color-mix(in srgb, var(--accent) 62%, #a3a3ab 38%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ap-status-badge:not(.ap-status-badge--my-turn) {
+    --ap-badge-ring: #3a3a40;
+    --ap-badge-ink: #5a5a62;
+    --ap-badge-ink-strong: #72727a;
+  }
+
+  .ap-status-badge--my-turn {
+    --ap-badge-ring: color-mix(in srgb, var(--accent) 52%, #5a5a62 48%);
+    --ap-badge-ink: color-mix(in srgb, var(--accent) 52%, #5a5a62 48%);
+    --ap-badge-ink-strong: color-mix(in srgb, var(--accent) 56%, #72727a 44%);
+  }
+}
