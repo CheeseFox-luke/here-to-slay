@@ -91,7 +91,7 @@ import {
   RESTOCK_HAND_AP_COST,
   initGame,
 } from './gameState.js'
-import { saveGameState, loadGameState } from './roomSync.js'
+import { saveGameState, loadGameState, connectToRoom } from './roomSync.js'
 import './App.css'
 
 function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
@@ -126,34 +126,40 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     /** @type {string | null} */ (null),
   )
 
-  // Flag to skip re-saving state that we just received from another tab.
-  const isFromStorageRef = useRef(false)
+  // Ref to always hold the latest game state (for host's initial push on WS connect).
+  const gameRef = useRef(game)
+  useEffect(() => { gameRef.current = game }, [game])
 
-  // Listen for game state changes written by other tabs via localStorage.
-  // The native 'storage' event fires on every same-origin tab EXCEPT the one
-  // that made the write, so no explicit message passing is needed.
+  // Ref to the WebSocket send function; set once the connection is established.
+  const wsSendRef = useRef(null)
+
+  // Flag to skip re-broadcasting state that arrived from the server.
+  const isFromRemoteRef = useRef(false)
+
+  // WebSocket connection — connect once per roomCode.
   useEffect(() => {
     if (!roomCode) return
-    function handleStorage(e) {
-      if (e.key !== `hts_gamestate_${roomCode}`) return
-      if (!e.newValue) return
-      try {
-        const parsed = JSON.parse(e.newValue)
-        if (parsed) {
-          isFromStorageRef.current = true
-          setGame(parsed)
-        }
-      } catch {}
+    const conn = connectToRoom(
+      roomCode,
+      (newState) => {
+        isFromRemoteRef.current = true
+        setGame(newState)
+      },
+      () => gameRef.current,
+    )
+    wsSendRef.current = conn.send
+    return () => {
+      conn.disconnect()
+      wsSendRef.current = null
     }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
   }, [roomCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist game state to localStorage after every local action.
-  // Skip when the update came from another tab (storage event) to avoid loops.
+  // Broadcast local state changes over WebSocket and persist to localStorage.
+  // Skip when the update was received from the server (avoids echo loops).
   useEffect(() => {
     if (!game || !roomCode) return
-    if (isFromStorageRef.current) { isFromStorageRef.current = false; return }
+    if (isFromRemoteRef.current) { isFromRemoteRef.current = false; return }
+    wsSendRef.current?.(game)
     saveGameState(roomCode, game)
   }, [game, roomCode])
 
