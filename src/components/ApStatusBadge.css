@@ -1,6 +1,5 @@
 /**
- * 位置：game-table-zone 内绝对定位，弃牌堆列左侧、对手条下方（见 App.css）。
- * 透明底 + 灰/紫圆环；尺寸约为初版的 1.5×。
+ * 位置：固定于视口中部偏右；左移一列 panel 宽，为右侧对手列留白（见 App.css --game-ap-badge-right）。
  */
 .ap-status-badge {
   --ap-badge-ring: #d6d6da;
@@ -9,7 +8,7 @@
 
   position: fixed;
   top: 50dvh;
-  right: calc(var(--game-table-discard-col, 140px) + 20px);
+  right: var(--game-ap-badge-right, calc(140px + 20px + 260px));
   transform: translateY(-50%);
   z-index: 15;
   width: 9.75rem;

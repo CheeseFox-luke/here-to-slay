@@ -23,7 +23,6 @@ import {
 import { getModifierEffect } from './data/modifierEffects.js'
 import { canDrawFromMainDeck } from './deckHelpers.js'
 import {
-  ATTACK_MONSTER_ACTION_NAME,
   RESTOCK_HAND_ACTION_NAME,
   attackMonster,
   confirmHeroPlayChoice,
@@ -94,7 +93,7 @@ import {
   INITIAL_ACTION_POINTS,
   initGame,
 } from './gameState.js'
-import { saveGameState, loadGameState } from './roomSync.js'
+import { saveGameState, loadGameState, connectToRoom } from './roomSync.js'
 import {
   getActionConsoleMode,
   handHasPlayableChallenge,
@@ -140,34 +139,40 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     /** @type {string | null} */ (null),
   )
 
-  // Flag to skip re-saving state that we just received from another tab.
-  const isFromStorageRef = useRef(false)
+  // Ref to always hold the latest game state (for host's initial push on WS connect).
+  const gameRef = useRef(game)
+  useEffect(() => { gameRef.current = game }, [game])
 
-  // Listen for game state changes written by other tabs via localStorage.
-  // The native 'storage' event fires on every same-origin tab EXCEPT the one
-  // that made the write, so no explicit message passing is needed.
+  // Ref to the WebSocket send function; set once the connection is established.
+  const wsSendRef = useRef(null)
+
+  // Flag to skip re-broadcasting state that arrived from the server.
+  const isFromRemoteRef = useRef(false)
+
+  // WebSocket connection — connect once per roomCode.
   useEffect(() => {
     if (!roomCode) return
-    function handleStorage(e) {
-      if (e.key !== `hts_gamestate_${roomCode}`) return
-      if (!e.newValue) return
-      try {
-        const parsed = JSON.parse(e.newValue)
-        if (parsed) {
-          isFromStorageRef.current = true
-          setGame(parsed)
-        }
-      } catch {}
+    const conn = connectToRoom(
+      roomCode,
+      (newState) => {
+        isFromRemoteRef.current = true
+        setGame(newState)
+      },
+      () => gameRef.current,
+    )
+    wsSendRef.current = conn.send
+    return () => {
+      conn.disconnect()
+      wsSendRef.current = null
     }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
   }, [roomCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist game state to localStorage after every local action.
-  // Skip when the update came from another tab (storage event) to avoid loops.
+  // Broadcast local state changes over WebSocket and persist to localStorage.
+  // Skip when the update was received from the server (avoids echo loops).
   useEffect(() => {
     if (!game || !roomCode) return
-    if (isFromStorageRef.current) { isFromStorageRef.current = false; return }
+    if (isFromRemoteRef.current) { isFromRemoteRef.current = false; return }
+    wsSendRef.current?.(game)
     saveGameState(roomCode, game)
   }, [game, roomCode])
 
@@ -1021,6 +1026,42 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
         isPlayableFromHand(selectedHandCard, game, mySeat),
     ) && handHasPlayableModifier(game, mySeat)
 
+  const opponentEntries = game.players
+    .map((player, playerIndex) => ({ player, playerIndex }))
+    .filter(({ playerIndex }) => playerIndex !== mySeat)
+  const leftOpponents = opponentEntries.slice(0, 2)
+  const rightOpponents = opponentEntries.slice(2)
+
+  function renderOpponentPanel({ player, playerIndex }) {
+    const iAmSelecting = heroSelectionPhase && heroSelection?.sourcePlayerIndex === mySeat
+    const partyClickableForSelection = iAmSelecting && isPartyClickableForSelection(game, playerIndex)
+    const iAmTargeting = heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection?.sourcePlayerIndex === mySeat
+    const partyClickableForHeroTarget = iAmTargeting && isPartyClickableForHeroTargetSelection(game, playerIndex)
+    const selectionMode = partyClickableForSelection
+      ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
+      : null
+    const iAmQiBear = qiBearPhase && qiBearSel?.sourcePlayerIndex === mySeat
+    const canEquipCursedHere = itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed
+    const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat && itemSelection?.kind !== 'holyCurselifter'
+    return (
+      <CompactPlayerPanel
+        key={player.id}
+        player={player}
+        isCurrent={playerIndex === game.currentPlayerIndex}
+        onHeroSkillClick={(hero) => handleHeroSkillClick(hero, playerIndex)}
+        heroSkillClickable={partyClickableForSelection || partyClickableForHeroTarget}
+        allowHeroClickWhenSkillUsed={partyClickableForSelection || partyClickableForHeroTarget}
+        onHeroEquipClick={canEquipCursedHere ? handleHeroEquipClick : undefined}
+        heroEquipSelectable={canEquipCursedHere}
+        selectionMode={selectionMode}
+        pendingDestroyMode={iAmQiBear || partyClickableForHeroTarget}
+        pendingDestroyIds={game.pendingDestroyTargets}
+        onItemClick={iAmItemSelecting ? handleItemClick : undefined}
+        itemsSelectable={iAmItemSelecting}
+      />
+    )
+  }
+
   return (
     <div className="game-layout">
       {/* Victory overlay */}
@@ -1405,73 +1446,29 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       />
 
       <div className="game-main">
-      {/* Top: opponent panels（左侧仅占对手宽度，右上预留空白） */}
-      <div className="game-opponents-row">
-      <div className="game-opponents">
-        {game.players
-          .map((player, playerIndex) => ({ player, playerIndex }))
-          .filter(({ playerIndex }) => playerIndex !== mySeat)
-          .map(({ player, playerIndex }) => {
-            // Only MY interactions are enabled — check mySeat is the source player
-            const iAmSelecting = heroSelectionPhase && heroSelection?.sourcePlayerIndex === mySeat
-            const partyClickableForSelection = iAmSelecting && isPartyClickableForSelection(game, playerIndex)
-            const iAmTargeting = heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection?.sourcePlayerIndex === mySeat
-            const partyClickableForHeroTarget = iAmTargeting && isPartyClickableForHeroTargetSelection(game, playerIndex)
-            const selectionMode = partyClickableForSelection
-              ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
-              : null
-            // QiBear: only the source player can mark heroes to destroy on opponent parties
-            const iAmQiBear = qiBearPhase && qiBearSel?.sourcePlayerIndex === mySeat
-            // Item equip cursed: I (mySeat) equip a cursed item on an opponent hero
-            const canEquipCursedHere = itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed
-            // Item selection: only source player clicks items; Holy Curselifter restricts to own party
-            const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat && itemSelection?.kind !== 'holyCurselifter'
-            return (
-              <CompactPlayerPanel
-                key={player.id}
-                player={player}
-                isCurrent={playerIndex === game.currentPlayerIndex}
-                onHeroSkillClick={(hero) => handleHeroSkillClick(hero, playerIndex)}
-                heroSkillClickable={partyClickableForSelection || partyClickableForHeroTarget}
-                allowHeroClickWhenSkillUsed={partyClickableForSelection || partyClickableForHeroTarget}
-                onHeroEquipClick={canEquipCursedHere ? handleHeroEquipClick : undefined}
-                heroEquipSelectable={canEquipCursedHere}
-                selectionMode={selectionMode}
-                pendingDestroyMode={iAmQiBear || partyClickableForHeroTarget}
-                pendingDestroyIds={game.pendingDestroyTargets}
-                onItemClick={iAmItemSelecting ? handleItemClick : undefined}
-                itemsSelectable={iAmItemSelecting}
-              />
-            )
-          })
-        }
-      </div>
-      <div className="game-main-deck-corner" id="main-deck-deal-origin">
-        <DeckPile
-          count={game.mainDeck.length}
-          backImageUrl={game.mainDeck[0]?.backImageUrl ?? CARD_BACKS.MAIN}
-          label="Main deck"
-          variant="main"
-          showCount={false}
-        />
-      </div>
-      </div>
+        {leftOpponents.length > 0 && (
+          <div className="game-opponents-left">
+            {leftOpponents.map(renderOpponentPanel)}
+          </div>
+        )}
 
-      <div className="game-table-zone">
-        <ApStatusBadge
-          actionPoints={game.actionPoints}
-          maxActionPoints={INITIAL_ACTION_POINTS}
-          turnLine={
-            isMyTurn ? 'Your turn' : `${currentPlayer?.name ?? 'Player'}'s turn`
-          }
-          isMyTurn={isMyTurn}
-        />
+        <div className="game-main-deck-corner" id="main-deck-deal-origin">
+          <DeckPile
+            count={game.mainDeck.length}
+            backImageUrl={game.mainDeck[0]?.backImageUrl ?? CARD_BACKS.MAIN}
+            label="Main deck"
+            variant="main"
+            showCount={false}
+          />
+        </div>
 
-      {/* Middle: game table */}
-      <div className="game-table">
+        {rightOpponents.length > 0 && (
+          <div className="game-opponents-right">
+            {rightOpponents.map(renderOpponentPanel)}
+          </div>
+        )}
 
-        {/* Left: deck piles */}
-        <div className="game-table__left">
+        <div className="game-monster-zone">
           <section className="table-section table-section--deck">
             <h3>Monster deck</h3>
             <DeckPile
@@ -1481,17 +1478,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               variant="monster"
             />
           </section>
-        </div>
-
-        {/* Center: active monsters */}
-        <div className="game-table__center">
-          <section className="table-section">
-            <h3>Active monsters</h3>
-            <p className="table-hint">
-              {canAttackMonster
-                ? `Click to ${ATTACK_MONSTER_ACTION_NAME} (${ATTACK_MONSTER_AP_COST} AP)`
-                : 'Attack costs 2 AP on your turn'}
-            </p>
+          <section className="table-section table-section--active-monsters">
             <ActiveMonsters
               monsters={game.activeMonsters}
               onAttack={handleAttackMonster}
@@ -1500,25 +1487,16 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
           </section>
         </div>
 
-        {/* Right: discard pile */}
-        <div className="game-table__right">
-          <section className="table-section table-section--discard">
-            <h3 className="table-section__title-row">
-              Discard
-              <span className="discard-pile__count">{game.discardPile.length}</span>
-            </h3>
-            {game.discardPile.length === 0
-              ? <p className="discard-pile__empty">Empty</p>
-              : (
-                <div className="discard-pile">
-                  <CardDisplay card={topDiscard} faceUp />
-                </div>
-              )
+        <div className="game-table-zone">
+          <ApStatusBadge
+            actionPoints={game.actionPoints}
+            maxActionPoints={INITIAL_ACTION_POINTS}
+            turnLine={
+              isMyTurn ? 'Your turn' : `${currentPlayer?.name ?? 'Player'}'s turn`
             }
-          </section>
+            isMyTurn={isMyTurn}
+          />
         </div>
-      </div>
-      </div>
       </div>
 
       {/* Bottom: my section */}
@@ -1555,7 +1533,22 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
         {/* My party + hand */}
         <div className="my-section__board">
-          <div className="my-section__corner" aria-hidden="true" />
+          <div className="my-section__corner my-section__corner--discard">
+            <section className="table-section table-section--discard">
+              <h3 className="table-section__title-row">
+                Discard
+                <span className="discard-pile__count">{game.discardPile.length}</span>
+              </h3>
+              {game.discardPile.length === 0
+                ? <p className="discard-pile__empty">Empty</p>
+                : (
+                  <div className="discard-pile">
+                    <CardDisplay card={topDiscard} faceUp />
+                  </div>
+                )
+              }
+            </section>
+          </div>
           <div className="my-section__strip">
           <div className="my-section__hand-area">
             <div className="card-row hand-row">
