@@ -1,0 +1,55 @@
+.top-deck-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.top-deck-dialog {
+  max-width: min(92vw, 700px);
+  padding: 1.25rem 1.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.top-deck-dialog__title {
+  margin: 0;
+  font-size: 1.15rem;
+  color: var(--text-h);
+}
+
+.top-deck-dialog__desc {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.top-deck-dialog__cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.top-deck-dialog__card-btn {
+  padding: 2px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+}
+
+.top-deck-dialog__card-btn:hover {
+  border-color: var(--accent-border);
+  transform: translateY(-3px);
+}

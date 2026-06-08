@@ -5,6 +5,8 @@ import CompactPlayerPanel from './components/CompactPlayerPanel.jsx'
 import DebugPanel from './components/DebugPanel.jsx'
 import DeckPile from './components/DeckPile.jsx'
 import CardPullDialog from './components/CardPullDialog.jsx'
+import TopDeckPickDialog from './components/TopDeckPickDialog.jsx'
+import BonusItemPlayDialog from './components/BonusItemPlayDialog.jsx'
 import EffectTargetDialog from './components/EffectTargetDialog.jsx'
 import ModifierChoiceDialog from './components/ModifierChoiceDialog.jsx'
 import ModifierTargetDialog from './components/ModifierTargetDialog.jsx'
@@ -55,12 +57,27 @@ import {
   playItemOnHero,
   playCursedItemOnHero,
   resolveWindsOfChange,
+  resolveHolyCurselifter,
+  passItemSelection,
   isPendingItemSelectionActive,
+  isPendingTopDeckPickActive,
+  resolveTopDeckPick,
+  isPendingBonusItemPlayActive,
+  resolveBonusItemPlay,
+  passBonusItemPlay,
+  isPendingMagicPlayChoiceActive,
+  confirmMagicPlayChoice,
+  declineMagicPlayChoice,
+  isPendingWigglesRollActive,
+  confirmWigglesRoll,
+  declineWigglesRoll,
   playModifierOnPendingRoll,
   restockHand,
   resolveCardPull,
   selectEffectTarget,
   selectEffectHeroTarget,
+  cancelHeroSelection,
+  cancelEffectHeroTargetSelection,
   selectHeroForPendingAction,
   setQiBearCount,
   toggleQiBearHeroTarget,
@@ -251,6 +268,14 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   const qiBearSel = game.pendingQiBearSelection
   const heroPlayChoicePhase = isPendingHeroPlayChoiceActive(game)
   const itemSelectionPhase = isPendingItemSelectionActive(game)
+  const topDeckPickPhase = isPendingTopDeckPickActive(game)
+  const topDeckPick = game.pendingTopDeckPick ?? null
+  const bonusItemPlayPhase = isPendingBonusItemPlayActive(game)
+  const bonusItemPlay = game.pendingBonusItemPlay ?? null
+  const magicPlayChoicePhase = isPendingMagicPlayChoiceActive(game)
+  const magicPlayChoice = game.pendingMagicPlayChoice ?? null
+  const wigglesRollPhase = isPendingWigglesRollActive(game)
+  const wigglesRoll = game.pendingWigglesRoll ?? null
   const itemSelection = game.pendingItemSelection ?? null
   const heroPlayChoice = game.pendingHeroPlayChoice
   const interruptPhase =
@@ -268,22 +293,26 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     heroFromHandPlayPhase ||
     itemSelectionPhase
   // All action gates require it to be MY turn (mySeat === currentPlayerIndex)
-  const canPlay = isMyTurn && game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId
+  const gameOver = game.winner != null
+  const canPlay = isMyTurn && game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId && !gameOver
   const canDraw =
     isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
+    !gameOver &&
     game.actionPoints >= DRAW_CARD_AP_COST &&
     canDrawFromMainDeck(game)
   const canRestock =
     isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
+    !gameOver &&
     game.actionPoints >= RESTOCK_HAND_AP_COST
   const canAttackMonster =
     isMyTurn &&
     !interruptPhase &&
     !itemEquipInstanceId &&
+    !gameOver &&
     game.actionPoints >= ATTACK_MONSTER_AP_COST
   const topDiscard = game.discardPile[game.discardPile.length - 1]
   const challengeAttackerIndex = getChallengeAttackerIndex(game)
@@ -464,7 +493,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
   function handleItemClick(hero, item) {
     if (!itemSelectionPhase) return
-    const { game: nextGame, error } = resolveWindsOfChange(game, hero.instanceId, item.instanceId)
+    const kind = itemSelection?.kind
+    const fn = kind === 'holyCurselifter' ? resolveHolyCurselifter : resolveWindsOfChange
+    const { game: nextGame, error } = fn(game, hero.instanceId, item.instanceId)
     if (error) { window.alert(error); return }
     setGame(nextGame)
   }
@@ -721,6 +752,58 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     setGame(nextGame)
   }
 
+  function handleResolveTopDeckPick(instanceId) {
+    const { game: nextGame, error } = resolveTopDeckPick(game, instanceId)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+  }
+
+  function handleResolveBonusItemPlay(itemInstanceId, heroOwnerIndex, slotIndex) {
+    const { game: nextGame, error } = resolveBonusItemPlay(game, itemInstanceId, heroOwnerIndex, slotIndex)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+  }
+
+  function handlePassBonusItemPlay() {
+    const { game: nextGame, error } = passBonusItemPlay(game)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    setGame(nextGame)
+  }
+
+  function handleConfirmMagicPlayChoice() {
+    const { game: nextGame, error } = confirmMagicPlayChoice(game)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
+  function handleDeclineMagicPlayChoice() {
+    const { game: nextGame, error } = declineMagicPlayChoice(game)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
+  function handleConfirmWigglesRoll() {
+    const { game: nextGame, diceRoll, error } = confirmWigglesRoll(game)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+    if (diceRoll) setDisplayRoll(diceRoll)
+  }
+
+  function handleDeclineWigglesRoll() {
+    const { game: nextGame, error } = declineWigglesRoll(game)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
   function handleHeroSkillClick(hero, partyOwnerIndex) {
     if (qiBearPhase) {
       handleToggleQiBearTarget(hero.instanceId)
@@ -789,6 +872,19 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
   return (
     <div className="game-layout">
+      {/* Victory overlay */}
+      {game.winner != null && (
+        <div className="victory-overlay">
+          <div className="victory-modal">
+            <div className="victory-trophy">🏆</div>
+            <h1 className="victory-title">
+              {game.players[game.winner]?.name ?? `Player ${game.winner + 1}`} Wins!
+            </h1>
+            <p className="victory-subtitle">The adventure is over.</p>
+          </div>
+        </div>
+      )}
+
       {/* Phase/status overlays */}
       <RollFeedback
         pendingRoll={rollToShow}
@@ -952,12 +1048,50 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       {heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection && (
         <div className="modifier-phase-bar challenge-phase-bar">
           {mySeat === game.pendingEffectHeroTargetSelection.sourcePlayerIndex ? (
-            <p className="challenge-phase-bar__text">
-              <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>: Click a hero to <strong>{heroTargetAction}</strong>.
-            </p>
+            <>
+              <p className="challenge-phase-bar__text">
+                <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>: Click a hero to <strong>{heroTargetAction}</strong>.
+              </p>
+              <button
+                type="button"
+                className="game-actions__btn"
+                onClick={() => {
+                  const { game: nextGame } = cancelEffectHeroTargetSelection(game)
+                  setGame(nextGame)
+                }}
+              >
+                Pass (no {heroTargetAction})
+              </button>
+            </>
           ) : (
             <p className="challenge-phase-bar__text">
               Waiting for <strong>{game.players[game.pendingEffectHeroTargetSelection.sourcePlayerIndex]?.name}</strong> to pick a hero to {heroTargetAction}…
+            </p>
+          )}
+        </div>
+      )}
+
+      {heroSelectionPhase && heroSelection && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          {mySeat === heroSelection.sourcePlayerIndex ? (
+            <>
+              <p className="challenge-phase-bar__text">
+                Pick a hero to <strong>{heroSelection.action}</strong>.
+              </p>
+              <button
+                type="button"
+                className="game-actions__btn"
+                onClick={() => {
+                  const { game: nextGame } = cancelHeroSelection(game)
+                  setGame(nextGame)
+                }}
+              >
+                Pass (no {heroSelection.action})
+              </button>
+            </>
+          ) : (
+            <p className="challenge-phase-bar__text">
+              Waiting for <strong>{game.players[heroSelection.sourcePlayerIndex]?.name}</strong> to pick a hero to {heroSelection.action}…
             </p>
           )}
         </div>
@@ -984,8 +1118,70 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               ? "If it's a Hero card, pull another one!"
               : undefined
         }
+        showFaceUp={cardPull?.showFaceUp ?? false}
         onPick={handleResolveCardPull}
       />
+
+      <TopDeckPickDialog
+        open={topDeckPickPhase && topDeckPick !== null && topDeckPick.sourcePlayerIndex === mySeat}
+        sourceLabel={topDeckPick?.sourceLabel ?? ''}
+        phase={topDeckPick?.phase ?? 'pick'}
+        cards={topDeckPick?.cards ?? []}
+        onPick={handleResolveTopDeckPick}
+      />
+
+      <BonusItemPlayDialog
+        open={bonusItemPlayPhase && bonusItemPlay !== null && bonusItemPlay.sourcePlayerIndex === mySeat}
+        sourceLabel={bonusItemPlay?.sourceLabel ?? ''}
+        eligibleItems={
+          bonusItemPlay !== null
+            ? (() => {
+                const hand = game.players[bonusItemPlay.sourcePlayerIndex]?.hand ?? []
+                if (bonusItemPlay.eligibleInstanceIds !== null) {
+                  return hand.filter((c) => bonusItemPlay.eligibleInstanceIds.includes(c.instanceId))
+                }
+                return hand.filter((c) => c.type === CARD_TYPES.ITEM || c.type === CARD_TYPES.CURSED_ITEM)
+              })()
+            : []
+        }
+        players={game.players}
+        sourcePlayerIndex={bonusItemPlay?.sourcePlayerIndex ?? mySeat}
+        drawAfter={bonusItemPlay?.drawAfter ?? 0}
+        onEquip={handleResolveBonusItemPlay}
+        onPass={handlePassBonusItemPlay}
+      />
+
+      {/* Magic Play Choice (Snowball / Buttons) */}
+      {magicPlayChoicePhase && magicPlayChoice !== null && magicPlayChoice.sourcePlayerIndex === mySeat && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          <p className="challenge-phase-bar__text">
+            <strong>{magicPlayChoice.sourceLabel}</strong>: You drew a Magic card —{' '}
+            <strong>{magicPlayChoice.magicCard.name}</strong>. Play it immediately
+            {(magicPlayChoice.drawAfterPlay ?? 0) > 0 ? ' and draw another card' : ''}?
+          </p>
+          <button type="button" className="game-actions__btn game-actions__btn--primary" onClick={handleConfirmMagicPlayChoice}>
+            Play it!
+          </button>
+          <button type="button" className="game-actions__btn" onClick={handleDeclineMagicPlayChoice}>
+            Keep in hand
+          </button>
+        </div>
+      )}
+
+      {/* Wiggles roll prompt */}
+      {wigglesRollPhase && wigglesRoll !== null && wigglesRoll.sourcePlayerIndex === mySeat && (
+        <div className="modifier-phase-bar challenge-phase-bar">
+          <p className="challenge-phase-bar__text">
+            <strong>Wiggles</strong>: Stolen <strong>{wigglesRoll.stolenHeroName}</strong>. Roll to use its effect immediately?
+          </p>
+          <button type="button" className="game-actions__btn game-actions__btn--primary" onClick={handleConfirmWigglesRoll}>
+            Roll for it!
+          </button>
+          <button type="button" className="game-actions__btn" onClick={handleDeclineWigglesRoll}>
+            Skip
+          </button>
+        </div>
+      )}
 
       {pendingDiscardPhase && pendingDiscard && discardingPlayer && (
         <div className="modifier-phase-bar challenge-phase-bar">
@@ -1050,10 +1246,26 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       {itemSelectionPhase && itemSelection && (
         <div className="modifier-phase-bar challenge-phase-bar">
           {mySeat === itemSelection.sourcePlayerIndex ? (
-            <p className="challenge-phase-bar__text">
-              Click an equipped item on any party to return it to its owner's hand
-              (<strong>{itemSelection.sourceLabel}</strong>).
-            </p>
+            <>
+              <p className="challenge-phase-bar__text">
+                {itemSelection.kind === 'holyCurselifter'
+                  ? <>Click a cursed item on your own party to return it to your hand (<strong>{itemSelection.sourceLabel}</strong>).</>
+                  : <>Click an equipped item on any party to return it to its owner's hand (<strong>{itemSelection.sourceLabel}</strong>).</>
+                }
+              </p>
+              {itemSelection.kind === 'holyCurselifter' && (
+                <button
+                  type="button"
+                  className="game-actions__btn"
+                  onClick={() => {
+                    const { game: nextGame } = passItemSelection(game)
+                    setGame(nextGame)
+                  }}
+                >
+                  Pass (no choose)
+                </button>
+              )}
+            </>
           ) : (
             <p className="challenge-phase-bar__text">
               Waiting for <strong>{game.players[itemSelection.sourcePlayerIndex]?.name}</strong> to pick an item to return…
@@ -1112,8 +1324,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
             const iAmQiBear = qiBearPhase && qiBearSel?.sourcePlayerIndex === mySeat
             // Item equip cursed: I (mySeat) equip a cursed item on an opponent hero
             const canEquipCursedHere = itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed
-            // Item selection (Winds of Change): only source player clicks items
-            const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat
+            // Item selection: only source player clicks items; Holy Curselifter restricts to own party
+            const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat && itemSelection?.kind !== 'holyCurselifter'
             return (
               <CompactPlayerPanel
                 key={player.id}
@@ -1247,7 +1459,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               type="button"
               className="game-actions__btn game-actions__btn--primary"
               onClick={handleEndTurn}
-              disabled={interruptPhase || !isMyTurn}
+              disabled={interruptPhase || !isMyTurn || gameOver}
             >
               End turn
             </button>
@@ -1295,8 +1507,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
             }
             pendingDestroyMode={qiBearPhase || (heroTargetSelectionPhase && isPartyClickableForHeroTargetSelection(game, mySeat))}
             pendingDestroyIds={game.pendingDestroyTargets}
-            onItemClick={itemSelectionPhase ? handleItemClick : undefined}
-            itemsSelectable={itemSelectionPhase}
+            onItemClick={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat ? handleItemClick : undefined}
+            itemsSelectable={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat}
           />
 
           {/* My hand */}
