@@ -816,6 +816,68 @@
   to   { transform: scale(1);   opacity: 1; }
 }
 
+/* Leader 104 Wizard Draw Dialog */
+.wizard-draw-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wizard-draw-modal {
+  background: linear-gradient(135deg, #1a1c3a 0%, #2d2060 100%);
+  border: 2px solid #a78bfa;
+  border-radius: 14px;
+  padding: 28px 36px;
+  text-align: center;
+  animation: victory-pop 0.2s ease-out;
+  min-width: 280px;
+}
+
+.wizard-draw-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #c4b5fd;
+  margin-bottom: 10px;
+}
+
+.wizard-draw-desc {
+  font-size: 0.95rem;
+  color: #e2d9ff;
+  margin-bottom: 20px;
+}
+
+.wizard-draw-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.wizard-draw-btn {
+  padding: 8px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.wizard-draw-btn:hover { opacity: 0.85; }
+
+.wizard-draw-yes {
+  background: #7c3aed;
+  color: #fff;
+}
+
+.wizard-draw-no {
+  background: #374151;
+  color: #d1d5db;
+}
+
 @keyframes trophy-bounce {
   from { transform: translateY(0); }
   to   { transform: translateY(-8px); }

@@ -1,7 +1,66 @@
-import { withFaceUp } from './gameState.js'
+import { withFaceUp, createEmptyPartySlots } from './gameState.js'
+import { CARD_TYPES } from './data/cardUtils.js'
+import { shuffleDeck } from './data/cardUtils.js'
 
 /** @typedef {import('./gameState.js').GameState} GameState */
 /** @typedef {import('./gameState.js').CardInstance} CardInstance */
+
+/**
+ * Transform a freshly created 2-player game into a debug-bot game.
+ * - Player 1 becomes the bot: 5 random heroes in party, 5th hero has a random item equipped, 5 hand cards.
+ * - Player 0 gets infinite action points (999).
+ * - Adds debugBotIndex and debugInfiniteAp flags to the game state.
+ * @param {GameState} game - result of initGame(2)
+ * @returns {GameState}
+ */
+export function applyDebugBotSetup(game) {
+  const botIndex = 1
+  let mainDeck = [...game.mainDeck]
+
+  // Pull 5 hero cards from the main deck for the bot's party
+  const heroIndices = []
+  for (let i = 0; i < mainDeck.length && heroIndices.length < 5; i++) {
+    if (mainDeck[i].type === CARD_TYPES.HERO) heroIndices.push(i)
+  }
+  const heroSet = new Set(heroIndices)
+  const botHeroes = heroIndices.map((i) => withFaceUp(mainDeck[i]))
+  mainDeck = mainDeck.filter((_, i) => !heroSet.has(i))
+
+  // Pull 1 non-cursed item from the main deck for the 5th hero slot
+  const itemIdx = mainDeck.findIndex((c) => c.type === CARD_TYPES.ITEM)
+  let slotItem = null
+  if (itemIdx !== -1) {
+    slotItem = withFaceUp(mainDeck[itemIdx])
+    mainDeck = mainDeck.filter((_, i) => i !== itemIdx)
+  }
+
+  // Build bot party slots (heroes in slots 0-4, item on slot 4)
+  const partySlots = createEmptyPartySlots()
+  botHeroes.forEach((hero, i) => {
+    partySlots[i] = {
+      hero,
+      items: i === 4 && slotItem ? [slotItem] : [],
+      skillUsedThisTurn: false,
+    }
+  })
+
+  // Bot keeps its 5 drawn hand cards from initGame (already dealt)
+  const players = game.players.map((p, i) => {
+    if (i === botIndex) {
+      return { ...p, name: 'Bot', partySlots, isBot: true }
+    }
+    return p
+  })
+
+  return {
+    ...game,
+    players,
+    mainDeck,
+    actionPoints: 999, // human starts with effectively infinite AP
+    debugBotIndex: botIndex,
+    debugInfiniteAp: true,
+  }
+}
 
 export const DEBUG_MODE_STORAGE_KEY = 'hts-debug-mode'
 

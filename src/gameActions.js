@@ -159,6 +159,10 @@ export function isPendingHeroFromHandPlayActive(game) {
 /**
  * @param {GameState} game
  */
+export function isPendingLeaderWizardDrawActive(game) {
+  return (game.pendingLeaderWizardDraw ?? null) !== null
+}
+
 export function isInterruptPhaseActive(game) {
   return (
     isChallengeWindowActive(game) ||
@@ -173,8 +177,24 @@ export function isInterruptPhaseActive(game) {
     isPendingQiBearSelectionActive(game) ||
     isPendingHeroPlayChoiceActive(game) ||
     isPendingHeroFromHandPlayActive(game) ||
-    isPendingItemSelectionActive(game)
+    isPendingItemSelectionActive(game) ||
+    isPendingLeaderWizardDrawActive(game)
   )
+}
+
+/**
+ * If the active player has leader 104 (Wizard), set pendingLeaderWizardDraw
+ * so the UI can prompt "draw a card?" after a magic card is played.
+ * @param {GameState} game
+ * @param {number} playerIndex
+ * @returns {GameState}
+ */
+function maybeQueueWizardDraw(game, playerIndex) {
+  const player = game.players[playerIndex]
+  if (player?.leader?.effectId === 'leaderWizardDraw') {
+    return { ...game, pendingLeaderWizardDraw: { playerIndex } }
+  }
+  return game
 }
 
 /**
@@ -338,13 +358,30 @@ function findHeroItems(game, heroInstanceId) {
 }
 
 /**
- * Apply passive cursed-item roll penalties to a freshly rolled pendingRoll.
+ * Apply leader passive bonuses to a hero-effect roll.
+ * Called after applyHeroRollCurses so leader bonus always shows as a separate label.
+ * @param {GameState} game
  * @param {import('./gameState.js').PendingRoll} roll
- * @param {CardInstance[]} items
- * @param {number} [globalRollBonus]
+ * @param {number} rollingPlayerIndex
  * @returns {import('./gameState.js').PendingRoll}
  */
-function applyHeroRollCurses(roll, items, globalRollBonus = 0) {
+function applyLeaderPassives(game, roll, rollingPlayerIndex) {
+  const leader = game.players[rollingPlayerIndex]?.leader
+  if (!leader?.effectId) return roll
+  if (leader.effectId === 'leaderHeroRollBonus') {
+    return applyDeltaToPendingRoll(roll, 1, leader.name)
+  }
+  return roll
+}
+
+/**
+ * Apply passive cursed-item roll penalties to a freshly rolled pendingRoll.
+ * Does NOT apply globalRollBonus — that is handled by openModifierWindow.
+ * @param {import('./gameState.js').PendingRoll} roll
+ * @param {CardInstance[]} items
+ * @returns {import('./gameState.js').PendingRoll}
+ */
+function applyHeroRollCurses(roll, items) {
   let result = roll
   for (const item of items) {
     if (item.effectId === 'snakesEyesCurse') {
@@ -354,10 +391,24 @@ function applyHeroRollCurses(roll, items, globalRollBonus = 0) {
       result = applyDeltaToPendingRoll(result, +2, 'Really Big Ring')
     }
   }
-  if (globalRollBonus) {
-    result = applyDeltaToPendingRoll(result, globalRollBonus, 'Enchanted Spell')
-  }
   return result
+}
+
+/**
+ * Open the modifier window for a roll.
+ * Automatically applies any active globalRollBonus (e.g. Enchanted Spell) so
+ * the +2 shows up in the modifier display for ALL roll types without any
+ * player action during the window.
+ * @param {GameState} game
+ * @param {import('./gameState.js').PendingRoll} pendingRoll
+ * @returns {{ pendingRoll: import('./gameState.js').PendingRoll, modifierPassedBy: number[], modifierStartedAt: number }}
+ */
+function openModifierWindow(game, pendingRoll) {
+  let roll = pendingRoll
+  if (roll && game.globalRollBonus) {
+    roll = applyDeltaToPendingRoll(roll, game.globalRollBonus, 'Enchanted Spell')
+  }
+  return { pendingRoll: roll, modifierPassedBy: [], modifierStartedAt: Date.now() }
 }
 
 /**
@@ -492,7 +543,8 @@ function resolveStagedPlay(game, staged) {
       }
     } else {
       const baseRoll = rollForHeroEffect(played.rollRequirement ?? 6, attackerIndex)
-      pendingRoll = attachHeroEffectMeta(baseRoll, played, attackerIndex)
+      const leaderRoll = applyLeaderPassives(game, baseRoll, attackerIndex)
+      pendingRoll = attachHeroEffectMeta(leaderRoll, played, attackerIndex)
     }
   } else if (cardType === CARD_TYPES.MAGIC) {
     discardPile = [...discardPile, played]
@@ -502,7 +554,7 @@ function resolveStagedPlay(game, staged) {
       if (handAfterPlay.length >= 2) {
         const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
         return {
-          game: {
+          game: maybeQueueWizardDraw({
             ...game,
             players,
             discardPile,
@@ -517,12 +569,18 @@ function resolveStagedPlay(game, staged) {
             pendingEffectTargetSelection: null,
             pendingEffectHeroTargetSelection: null,
             pendingQiBearSelection: null,
-          },
+          }, attackerIndex),
           diceRoll: null,
           error: null,
         }
       }
       // Not enough cards — effect fizzles, card still goes to discard
+      const fizzlePlayers = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+      return {
+        game: maybeQueueWizardDraw({ ...game, players: fizzlePlayers, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null }, attackerIndex),
+        diceRoll: null,
+        error: null,
+      }
     }
     if (played.effectId === 'forcefulWinds') {
       const players = game.players.map((p) => {
@@ -531,24 +589,33 @@ function resolveStagedPlay(game, staged) {
         return { ...p, partySlots: clearedSlots, hand: [...p.hand, ...returnedItems] }
       })
       return {
-        game: { ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+        game: maybeQueueWizardDraw({ ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null }, attackerIndex),
         diceRoll: null,
         error: null,
       }
     }
     if (played.effectId === 'windsOfChange') {
       const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
+      const tempGame = { ...game, players, discardPile }
+      const anyEquipped = tempGame.players.some((p) => p.partySlots.some((s) => s && s.items.length > 0))
+      if (!anyEquipped) {
+        // No items on the board — skip the return step, just draw 1
+        const { game: afterDraw } = drawEffect(tempGame, { playerIndex: attackerIndex, count: 1 })
+        return {
+          game: maybeQueueWizardDraw({ ...afterDraw, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null }, attackerIndex),
+          diceRoll: null,
+          error: null,
+        }
+      }
       return {
-        game: {
-          ...game,
-          players,
-          discardPile,
+        game: maybeQueueWizardDraw({
+          ...tempGame,
           pendingItemSelection: { sourcePlayerIndex: attackerIndex, sourceLabel: 'Winds of Change' },
           pendingRoll: null,
           pendingEffectTargetSelection: null,
           pendingEffectHeroTargetSelection: null,
           pendingQiBearSelection: null,
-        },
+        }, attackerIndex),
         diceRoll: null,
         error: null,
       }
@@ -557,7 +624,7 @@ function resolveStagedPlay(game, staged) {
       const bonus = (game.globalRollBonus ?? 0) + 2
       const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
       return {
-        game: { ...game, players, discardPile, globalRollBonus: bonus, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+        game: maybeQueueWizardDraw({ ...game, players, discardPile, globalRollBonus: bonus, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null }, attackerIndex),
         diceRoll: null,
         error: null,
       }
@@ -566,7 +633,7 @@ function resolveStagedPlay(game, staged) {
       const { game: afterDraw } = drawEffect(game, { playerIndex: attackerIndex, count: 3 })
       const players = afterDraw.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
       return {
-        game: {
+        game: maybeQueueWizardDraw({
           ...afterDraw,
           players,
           discardPile,
@@ -580,7 +647,7 @@ function resolveStagedPlay(game, staged) {
           pendingEffectTargetSelection: null,
           pendingEffectHeroTargetSelection: null,
           pendingQiBearSelection: null,
-        },
+        }, attackerIndex),
         diceRoll: null,
         error: null,
       }
@@ -588,7 +655,7 @@ function resolveStagedPlay(game, staged) {
     if (played.effectId === 'destructiveSpell') {
       const players = game.players.map((p, i) => i === attackerIndex ? { ...p, partySlots } : p)
       return {
-        game: {
+        game: maybeQueueWizardDraw({
           ...game,
           players,
           discardPile,
@@ -603,7 +670,7 @@ function resolveStagedPlay(game, staged) {
           pendingEffectTargetSelection: null,
           pendingEffectHeroTargetSelection: null,
           pendingQiBearSelection: null,
-        },
+        }, attackerIndex),
         diceRoll: null,
         error: null,
       }
@@ -614,7 +681,7 @@ function resolveStagedPlay(game, staged) {
       if (heroesInDiscard.length === 0) {
         // No heroes in discard — fizzle
         return {
-          game: { ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+          game: maybeQueueWizardDraw({ ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null }, attackerIndex),
           diceRoll: null,
           error: null,
         }
@@ -625,13 +692,13 @@ function resolveStagedPlay(game, staged) {
           i === attackerIndex ? { ...p, hand: [...p.hand, { ...heroesInDiscard[0], faceUp: true }] } : p,
         )
         return {
-          game: { ...game, players: updatedPlayers, discardPile: discardWithoutHeroes, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+          game: maybeQueueWizardDraw({ ...game, players: updatedPlayers, discardPile: discardWithoutHeroes, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null }, attackerIndex),
           diceRoll: null,
           error: null,
         }
       }
       return {
-        game: {
+        game: maybeQueueWizardDraw({
           ...game,
           players,
           discardPile: discardWithoutHeroes,
@@ -645,7 +712,7 @@ function resolveStagedPlay(game, staged) {
           pendingEffectTargetSelection: null,
           pendingEffectHeroTargetSelection: null,
           pendingQiBearSelection: null,
-        },
+        }, attackerIndex),
         diceRoll: null,
         error: null,
       }
@@ -657,13 +724,13 @@ function resolveStagedPlay(game, staged) {
       if (!anyOwnHero || !anyOpponentHero) {
         // No valid swap possible — fizzle
         return {
-          game: { ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null },
+          game: maybeQueueWizardDraw({ ...game, players, discardPile, pendingRoll: null, pendingEffectTargetSelection: null, pendingEffectHeroTargetSelection: null, pendingQiBearSelection: null }, attackerIndex),
           diceRoll: null,
           error: null,
         }
       }
       return {
-        game: {
+        game: maybeQueueWizardDraw({
           ...game,
           players,
           discardPile,
@@ -677,7 +744,7 @@ function resolveStagedPlay(game, staged) {
           pendingEffectTargetSelection: null,
           pendingEffectHeroTargetSelection: null,
           pendingQiBearSelection: null,
-        },
+        }, attackerIndex),
         diceRoll: null,
         error: null,
       }
@@ -736,19 +803,18 @@ function resolveStagedPlay(game, staged) {
     index === attackerIndex ? { ...p, partySlots } : p,
   )
 
+  const mw = openModifierWindow(game, pendingRoll)
   return {
     game: {
       ...game,
       players,
       discardPile,
-      pendingRoll,
       pendingEffectTargetSelection,
       pendingEffectHeroTargetSelection,
       pendingQiBearSelection,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
+      ...mw,
     },
-    diceRoll: pendingRoll,
+    diceRoll: mw.pendingRoll,
     error: null,
   }
 }
@@ -1240,18 +1306,14 @@ export function confirmWigglesRoll(game) {
 
   const hero = slot.hero
   const baseRoll = rollForHeroEffect(hero.rollRequirement ?? 6, pending.sourcePlayerIndex)
-  const cursedRoll = applyHeroRollCurses(baseRoll, slot.items, game.globalRollBonus ?? 0)
-  const pendingRoll = attachHeroEffectMeta(cursedRoll, hero, pending.sourcePlayerIndex)
+  const cursedRoll = applyHeroRollCurses(baseRoll, slot.items)
+  const leaderRoll = applyLeaderPassives(game, cursedRoll, pending.sourcePlayerIndex)
+  const pendingRoll = attachHeroEffectMeta(leaderRoll, hero, pending.sourcePlayerIndex)
 
+  const mw = openModifierWindow(game, pendingRoll)
   return {
-    game: {
-      ...game,
-      pendingWigglesRoll: null,
-      pendingRoll,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
-    },
-    diceRoll: pendingRoll,
+    game: { ...game, pendingWigglesRoll: null, ...mw },
+    diceRoll: mw.pendingRoll,
   }
 }
 
@@ -1325,13 +1387,21 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
   const staged = game.pendingChallenge.stagedPlay
   const attacker = game.players[staged.attackerIndex]
 
-  const pendingRoll = rollForChallenge(
+  let pendingRoll = rollForChallenge(
     staged.attackerIndex,
     challengerIndex,
     attacker.name,
     challenger.name,
     staged,
   )
+
+  // Leader 103: +2 to the owning player's side of every challenge roll
+  if (game.players[staged.attackerIndex]?.leader?.effectId === 'leaderChallengeRollBonus') {
+    pendingRoll = applyDeltaToChallengeRoll(pendingRoll, 2, game.players[staged.attackerIndex].leader.name, 'attacker')
+  }
+  if (game.players[challengerIndex]?.leader?.effectId === 'leaderChallengeRollBonus') {
+    pendingRoll = applyDeltaToChallengeRoll(pendingRoll, 2, game.players[challengerIndex].leader.name, 'challenger')
+  }
 
   const hand = challenger.hand.filter((_, index) => index !== handIndex)
   const discardPile = [...game.discardPile, withFaceUp(card)]
@@ -1340,6 +1410,7 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
     index === challengerIndex ? { ...p, hand } : p,
   )
 
+  const mw = openModifierWindow(game, pendingRoll)
   return {
     game: {
       ...game,
@@ -1348,11 +1419,9 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
       pendingChallenge: null,
       challengePassedBy: [],
       challengeStartedAt: null,
-      pendingRoll,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
+      ...mw,
     },
-    pendingRoll,
+    pendingRoll: mw.pendingRoll,
     error: null,
   }
 }
@@ -1512,19 +1581,19 @@ export function triggerHeroSkill(game, heroInstanceId) {
   }
 
   const baseRoll = rollForHeroEffect(slot.hero.rollRequirement ?? 6, playerIndex)
-  const cursedRoll = applyHeroRollCurses(baseRoll, slot.items, game.globalRollBonus ?? 0)
-  const pendingRoll = attachHeroEffectMeta(cursedRoll, slot.hero, playerIndex)
+  const cursedRoll = applyHeroRollCurses(baseRoll, slot.items)
+  const leaderRoll = applyLeaderPassives(game, cursedRoll, playerIndex)
+  const pendingRoll = attachHeroEffectMeta(leaderRoll, slot.hero, playerIndex)
 
+  const mw = openModifierWindow(game, pendingRoll)
   return {
     game: {
       ...game,
       players,
       actionPoints: game.actionPoints - 1,
-      pendingRoll,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
+      ...mw,
     },
-    diceRoll: pendingRoll,
+    diceRoll: mw.pendingRoll,
   }
 }
 
@@ -1560,19 +1629,17 @@ export function attackMonster(game, monsterInstanceId) {
     monster.failAtOrBelow ?? 5,
     monster.successAtOrAbove ?? 8,
   )
-  if (game.globalRollBonus) {
-    pendingRoll = applyDeltaToPendingRoll(pendingRoll, game.globalRollBonus, 'Enchanted Spell')
+  if (game.players[playerIndex]?.leader?.effectId === 'leaderMonsterRollBonus') {
+    pendingRoll = applyDeltaToPendingRoll(pendingRoll, 1, game.players[playerIndex].leader.name)
   }
-
+  const mw = openModifierWindow(game, pendingRoll)
   return {
     game: {
       ...game,
       actionPoints: game.actionPoints - ATTACK_MONSTER_AP_COST,
-      pendingRoll,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
+      ...mw,
     },
-    diceRoll: pendingRoll,
+    diceRoll: mw.pendingRoll,
   }
 }
 
@@ -1650,6 +1717,18 @@ export function playModifierOnPendingRoll(
     index === playerIndex ? { ...p, hand } : p,
   )
 
+  // Leader 101: after playing any modifier, grant a free +1/-1 choice on the same roll
+  const leaderBonus =
+    game.players[playerIndex]?.leader?.effectId === 'leaderModifierBonus'
+      ? {
+          pendingLeaderModifierBonus: {
+            playerIndex,
+            leaderName: game.players[playerIndex].leader.name,
+            challengeTarget: challengeTarget ?? null,
+          },
+        }
+      : {}
+
   return {
     game: {
       ...game,
@@ -1658,9 +1737,126 @@ export function playModifierOnPendingRoll(
       pendingRoll,
       modifierPassedBy: [],
       modifierStartedAt: Date.now(),
+      ...leaderBonus,
     },
     pendingRoll,
   }
+}
+
+/**
+ * Activate the leader's active skill (costs 1 AP).
+ * Sets pendingLeaderSkillTarget so the player can choose a target player.
+ * @param {GameState} game
+ * @param {number} playerIndex
+ */
+export function activateLeaderSkill(game, playerIndex) {
+  if (game.currentPlayerIndex !== playerIndex) {
+    return { game, error: 'Not your turn.' }
+  }
+  if (isInterruptPhaseActive(game)) {
+    return { game, error: 'Finish the current action first.' }
+  }
+  const leader = game.players[playerIndex]?.leader
+  if (!leader?.effectId) {
+    return { game, error: 'Leader has no active skill.' }
+  }
+  const ACTIVE_SKILL_IDS = ['leaderActivePull']
+  if (!ACTIVE_SKILL_IDS.includes(leader.effectId)) {
+    return { game, error: 'Leader skill is passive, not active.' }
+  }
+  if (game.actionPoints < 1) {
+    return { game, error: 'Not enough action points (costs 1 AP).' }
+  }
+  return {
+    game: {
+      ...game,
+      actionPoints: game.actionPoints - 1,
+      pendingLeaderSkillTarget: {
+        sourcePlayerIndex: playerIndex,
+        skillId: leader.effectId,
+      },
+    },
+  }
+}
+
+/**
+ * Resolve the leader skill target selection.
+ * @param {GameState} game
+ * @param {number} targetPlayerIndex
+ */
+export function selectLeaderSkillTarget(game, targetPlayerIndex) {
+  const pending = game.pendingLeaderSkillTarget
+  if (!pending) return { game, error: 'No leader skill pending.' }
+
+  const cleared = { ...game, pendingLeaderSkillTarget: null }
+  const leader = game.players[pending.sourcePlayerIndex]?.leader
+
+  if (pending.skillId === 'leaderActivePull') {
+    const target = cleared.players[targetPlayerIndex]
+    if (!target || target.hand.length === 0) return { game: cleared }
+    return {
+      game: {
+        ...cleared,
+        pendingCardPull: {
+          sourcePlayerIndex: pending.sourcePlayerIndex,
+          targetPlayerIndex,
+          bonusTriggerType: null,
+          sourceLabel: leader?.name ?? 'Leader',
+        },
+      },
+    }
+  }
+
+  return { game: cleared }
+}
+
+/**
+ * @param {GameState} game
+ */
+export function isPendingLeaderSkillTargetActive(game) {
+  return (game.pendingLeaderSkillTarget ?? null) !== null
+}
+
+/**
+ * Leader 101: player chose +1 or -1 after playing a modifier.
+ * Applies the delta to the current pendingRoll (same side as the triggering modifier)
+ * without consuming any card or touching the discard pile.
+ *
+ * @param {GameState} game
+ * @param {number} delta  +1 or -1
+ */
+export function resolveLeaderModifierBonus(game, delta) {
+  const pending = game.pendingLeaderModifierBonus
+  if (!pending) return { game, error: 'No leader modifier bonus pending.' }
+  if (!game.pendingRoll) return { game: { ...game, pendingLeaderModifierBonus: null } }
+
+  const label = `${pending.leaderName}: ${delta >= 0 ? '+' : ''}${delta}`
+  const pendingRoll =
+    game.pendingRoll.rollType === 'challenge' && pending.challengeTarget
+      ? applyDeltaToChallengeRoll(game.pendingRoll, delta, label, pending.challengeTarget)
+      : applyDeltaToPendingRoll(game.pendingRoll, delta, label)
+
+  return {
+    game: { ...game, pendingRoll, pendingLeaderModifierBonus: null },
+    pendingRoll,
+  }
+}
+
+/**
+ * Resolve the Wizard leader's "draw a card?" bonus.
+ * @param {GameState} game
+ * @param {boolean} shouldDraw - true if the player chose to draw
+ * @returns {{ game: GameState, error: string | null }}
+ */
+export function resolveLeaderWizardDraw(game, shouldDraw) {
+  const pending = game.pendingLeaderWizardDraw
+  if (!pending) return { game, error: 'No wizard draw pending.' }
+  let nextGame = { ...game, pendingLeaderWizardDraw: null }
+  if (shouldDraw) {
+    const { game: afterDraw } = drawEffect(nextGame, { playerIndex: pending.playerIndex, count: 1 })
+    nextGame = afterDraw
+  }
+  return { game: nextGame, error: null }
 }
 
 /**
@@ -1867,10 +2063,11 @@ export function selectEffectTarget(game, targetPlayerIndex) {
   // 目标已确认，现在才投骰并开 modifier 窗口
   const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
   const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
-  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)
+  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems)
+  const leaderRoll = applyLeaderPassives(game, cursedRoll, sel.sourcePlayerIndex)
   /** @type {PendingRoll} */
   const pendingRoll = {
-    ...cursedRoll,
+    ...leaderRoll,
     heroName: sel.heroName,
     targetLabel: `${sel.heroName} → ${targetName}`,
     effectId: sel.effectId,
@@ -1879,15 +2076,10 @@ export function selectEffectTarget(game, targetPlayerIndex) {
     rollingHeroInstanceId: sel.sourceHeroInstanceId,
   }
 
+  const mw = openModifierWindow(game, pendingRoll)
   return {
-    game: {
-      ...game,
-      pendingEffectTargetSelection: null,
-      pendingRoll,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
-    },
-    pendingRoll,
+    game: { ...game, pendingEffectTargetSelection: null, ...mw },
+    pendingRoll: mw.pendingRoll,
   }
 }
 
@@ -2076,10 +2268,11 @@ export function selectEffectHeroTarget(game, heroInstanceId) {
     // All targets collected — now roll
     const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
     const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
-    const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)
+    const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems)
+    const leaderRoll = applyLeaderPassives(game, cursedRoll, sel.sourcePlayerIndex)
     /** @type {PendingRoll} */
     const pendingRoll = {
-      ...cursedRoll,
+      ...leaderRoll,
       heroName: sel.heroName,
       targetLabel: `${sel.heroName} → ${newSelected.length} heroes`,
       effectId: sel.effectId,
@@ -2087,26 +2280,21 @@ export function selectEffectHeroTarget(game, heroInstanceId) {
       sourceHeroInstanceId: sel.sourceHeroInstanceId,
       rollingHeroInstanceId: sel.sourceHeroInstanceId,
     }
+    const mw = openModifierWindow(game, pendingRoll)
     return {
-      game: {
-        ...game,
-        pendingEffectHeroTargetSelection: null,
-        pendingDestroyTargets: newSelected,
-        pendingRoll,
-        modifierPassedBy: [],
-        modifierStartedAt: Date.now(),
-      },
-      pendingRoll,
+      game: { ...game, pendingEffectHeroTargetSelection: null, pendingDestroyTargets: newSelected, ...mw },
+      pendingRoll: mw.pendingRoll,
     }
   }
 
   // Single-target path (original behaviour)
   const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
   const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
-  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)
+  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems)
+  const leaderRoll = applyLeaderPassives(game, cursedRoll, sel.sourcePlayerIndex)
   /** @type {PendingRoll} */
   const pendingRoll = {
-    ...cursedRoll,
+    ...leaderRoll,
     heroName: sel.heroName,
     targetLabel: `${sel.heroName} → ${targetHeroName}`,
     effectId: sel.effectId,
@@ -2115,16 +2303,10 @@ export function selectEffectHeroTarget(game, heroInstanceId) {
     rollingHeroInstanceId: sel.sourceHeroInstanceId,
   }
 
+  const mw = openModifierWindow(game, pendingRoll)
   return {
-    game: {
-      ...game,
-      pendingEffectHeroTargetSelection: null,
-      pendingDestroyTargets: [heroInstanceId],
-      pendingRoll,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
-    },
-    pendingRoll,
+    game: { ...game, pendingEffectHeroTargetSelection: null, pendingDestroyTargets: [heroInstanceId], ...mw },
+    pendingRoll: mw.pendingRoll,
   }
 }
 
@@ -2204,10 +2386,11 @@ export function confirmQiBearSelection(game, sourcePlayerIndex) {
 
   const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
   const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
-  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)
+  const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems)
+  const leaderRoll = applyLeaderPassives(game, cursedRoll, sel.sourcePlayerIndex)
   /** @type {PendingRoll} */
   const pendingRoll = {
-    ...cursedRoll,
+    ...leaderRoll,
     heroName: sel.heroName,
     targetLabel:
       sel.count > 0
@@ -2219,16 +2402,10 @@ export function confirmQiBearSelection(game, sourcePlayerIndex) {
     rollingHeroInstanceId: sel.sourceHeroInstanceId,
   }
 
+  const mw = openModifierWindow(game, pendingRoll)
   return {
-    game: {
-      ...game,
-      pendingQiBearSelection: null,
-      pendingRoll,
-      pendingDestroyTargets: sel.heroTargets,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
-    },
-    pendingRoll,
+    game: { ...game, pendingQiBearSelection: null, pendingDestroyTargets: sel.heroTargets, ...mw },
+    pendingRoll: mw.pendingRoll,
   }
 }
 
@@ -2786,12 +2963,13 @@ function checkWinCondition(game, playerIndex) {
   // Condition 1: slain 3+ monsters
   if (player.slainMonsters.length >= 3) return true
 
-  // Condition 2: at least one hero of every class in party
+  // Condition 2: at least one hero of every class in party (leader counts too)
   const classesInParty = new Set(
     player.partySlots
       .filter((s) => s !== null)
       .map((s) => s.hero.class),
   )
+  if (player.leader?.class) classesInParty.add(player.leader.class)
   if (ALL_HERO_CLASSES.every((cls) => classesInParty.has(cls))) return true
 
   return false
@@ -2816,7 +2994,7 @@ export function endTurn(game) {
     ...game,
     players,
     currentPlayerIndex: nextIndex,
-    actionPoints: INITIAL_ACTION_POINTS,
+    actionPoints: (game.debugInfiniteAp && nextIndex === 0) ? 999 : INITIAL_ACTION_POINTS,
     pendingRoll: null,
     pendingChallenge: null,
     pendingEffectTargetSelection: null,
@@ -2836,6 +3014,9 @@ export function endTurn(game) {
     pendingBonusItemPlay: null,
     pendingMagicPlayChoice: null,
     pendingWigglesRoll: null,
+    pendingLeaderModifierBonus: null,
+    pendingLeaderSkillTarget: null,
+    pendingLeaderWizardDraw: null,
     antiChallenge: false,
     antiModifier: false,
     challengePassedBy: [],

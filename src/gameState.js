@@ -323,6 +323,25 @@ export function partyHasHero(partySlots) {
  */
 
 /**
+ * Leader 102: active skill — source player chose to use the leader skill
+ * and must now pick a target player.
+ *
+ * @typedef {Object} PendingLeaderSkillTarget
+ * @property {number} sourcePlayerIndex
+ * @property {string} skillId - the leader's effectId that was activated
+ */
+
+/**
+ * Leader 101: after a player plays any modifier card, they may apply an
+ * additional free +1 or -1 to the same roll (no card consumed, no discard).
+ *
+ * @typedef {Object} PendingLeaderModifierBonus
+ * @property {number} playerIndex - the player who gets to choose
+ * @property {string} leaderName - label shown in the roll feedback
+ * @property {'attacker' | 'challenger' | null} challengeTarget - for challenge rolls, which side to modify; null for hero/monster rolls
+ */
+
+/**
  * @typedef {Object} PartySlot
  * @property {CardInstance} hero
  * @property {CardInstance[]} items
@@ -338,6 +357,7 @@ export function partyHasHero(partySlots) {
  * @property {(PartySlot | null)[]} partySlots
  * @property {CardInstance[]} leaderItems
  * @property {CardInstance[]} slainMonsters
+ * @property {boolean} [isBot]
  */
 
 /**
@@ -371,9 +391,14 @@ export function partyHasHero(partySlots) {
  * @property {PendingBonusItemPlay | null} [pendingBonusItemPlay]
  * @property {PendingMagicPlayChoice | null} [pendingMagicPlayChoice]
  * @property {PendingWigglesRoll | null} [pendingWigglesRoll]
+ * @property {PendingLeaderModifierBonus | null} [pendingLeaderModifierBonus]
+ * @property {PendingLeaderSkillTarget | null} [pendingLeaderSkillTarget]
+ * @property {{ playerIndex: number } | null} [pendingLeaderWizardDraw]
  * @property {number | null} [partyAntiSteal] - playerIndex whose entire party cannot be stolen; cleared at start of that player's next turn.
  * @property {number | null} [partyAntiDestroy] - playerIndex whose entire party cannot be destroyed; cleared at start of that player's next turn.
  * @property {number | null} [winner] - playerIndex of the winner; null while game is ongoing.
+ * @property {number | null} [debugBotIndex] - playerIndex of the debug bot; null if not in debug mode.
+ * @property {boolean} [debugInfiniteAp] - if true, human player (seat 0) gets unlimited action points.
  */
 
 /**

@@ -19,6 +19,7 @@ import {
   debugDrawCardToHand,
   loadDebugModeEnabled,
   saveDebugModeEnabled,
+  applyDebugBotSetup,
 } from './debugMode.js'
 import { getModifierEffect } from './data/modifierEffects.js'
 import { canDrawFromMainDeck } from './deckHelpers.js'
@@ -72,6 +73,12 @@ import {
   isPendingWigglesRollActive,
   confirmWigglesRoll,
   declineWigglesRoll,
+  resolveLeaderModifierBonus,
+  resolveLeaderWizardDraw,
+  activateLeaderSkill,
+  selectLeaderSkillTarget,
+  isPendingLeaderSkillTargetActive,
+  isPendingLeaderWizardDrawActive,
   playModifierOnPendingRoll,
   restockHand,
   resolveCardPull,
@@ -103,7 +110,7 @@ import {
 } from './actionConsoleHelpers.js'
 import './App.css'
 
-function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
+function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false }) {
   const isHost = mySeat === 0
 
   // Game state init: try localStorage first (handles rejoins + non-host initial load).
@@ -114,7 +121,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       if (stored) return stored
     }
     if (isHost || !roomCode) {
-      const newGame = initGame(playerCount)
+      let newGame = initGame(playerCount)
+      if (debugBot) newGame = applyDebugBotSetup(newGame)
       if (roomCode) saveGameState(roomCode, newGame)
       return newGame
     }
@@ -247,6 +255,52 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     return () => window.clearTimeout(timer)
   }, [game?.pendingRoll, displayRoll])
 
+  // Debug-bot auto-pass: whenever the bot needs to act, pass immediately.
+  useEffect(() => {
+    if (!game) return
+    const botIndex = game.debugBotIndex ?? null
+    if (botIndex === null) return
+
+    // Bot's turn → auto end
+    if (game.currentPlayerIndex === botIndex && !game.winner) {
+      const timer = window.setTimeout(() => {
+        setGame((prev) => {
+          if (!prev || prev.currentPlayerIndex !== botIndex) return prev
+          return endTurn(prev)
+        })
+      }, 400)
+      return () => window.clearTimeout(timer)
+    }
+
+    // Challenge window open — auto-pass for bot if it hasn't passed yet
+    if (game.pendingChallenge && !game.challengePassedBy.includes(botIndex)) {
+      setGame((prev) => {
+        if (!prev?.pendingChallenge || prev.challengePassedBy.includes(botIndex)) return prev
+        const { game: next, diceRoll } = passChallengeWindow(prev, botIndex)
+        if (diceRoll) setDisplayRoll(diceRoll)
+        return next
+      })
+    }
+
+    // Modifier window open — auto-pass for bot if it hasn't passed yet
+    if (game.pendingRoll && !game.modifierPassedBy.includes(botIndex)) {
+      setGame((prev) => {
+        if (!prev?.pendingRoll || prev.modifierPassedBy.includes(botIndex)) return prev
+        const { game: next, diceRoll } = passModifierPhaseWithResult(prev, botIndex)
+        if (diceRoll) setDisplayRoll(diceRoll)
+        return next
+      })
+    }
+  }, [ // eslint-disable-line react-hooks/exhaustive-deps
+    game?.debugBotIndex,
+    game?.currentPlayerIndex,
+    game?.pendingChallenge,
+    game?.pendingRoll,
+    game?.challengePassedBy,
+    game?.modifierPassedBy,
+    game?.winner,
+  ])
+
   useEffect(() => {
     setSelectedHandCardId(null)
   }, [game?.pendingChallenge, game?.pendingRoll])
@@ -307,6 +361,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   const wigglesRoll = game.pendingWigglesRoll ?? null
   const itemSelection = game.pendingItemSelection ?? null
   const heroPlayChoice = game.pendingHeroPlayChoice
+  const leaderSkillTargetPhase = isPendingLeaderSkillTargetActive(game)
+  const leaderSkillTarget = game.pendingLeaderSkillTarget ?? null
+  const leaderWizardDrawPhase = isPendingLeaderWizardDrawActive(game)
   const interruptPhase =
     modifierPhase ||
     challengePhase ||
@@ -320,7 +377,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     qiBearPhase ||
     heroPlayChoicePhase ||
     heroFromHandPlayPhase ||
-    itemSelectionPhase
+    itemSelectionPhase ||
+    leaderSkillTargetPhase ||
+    leaderWizardDrawPhase
   // All action gates require it to be MY turn (mySeat === currentPlayerIndex)
   const gameOver = game.winner != null
   const canPlay = isMyTurn && game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId && !gameOver
@@ -693,6 +752,30 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       modifierChoice.challengeTarget,
     )
     setModifierChoice(null)
+  }
+
+  function handleActivateLeaderSkill() {
+    const { game: nextGame, error } = activateLeaderSkill(game, mySeat)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
+  function handleSelectLeaderSkillTarget(targetPlayerIndex) {
+    const { game: nextGame } = selectLeaderSkillTarget(game, targetPlayerIndex)
+    setGame(nextGame)
+  }
+
+  function handleLeaderWizardDraw(shouldDraw) {
+    const { game: nextGame, error } = resolveLeaderWizardDraw(game, shouldDraw)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
+  function handleLeaderModifierBonus(delta) {
+    const { game: nextGame, pendingRoll, error } = resolveLeaderModifierBonus(game, delta)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+    if (pendingRoll) setDisplayRoll(pendingRoll)
   }
 
   function handlePassModifier() {
@@ -1440,6 +1523,40 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
         onCancel={() => setModifierChoice(null)}
       />
 
+      {/* Leader 102: active skill — pick a target player */}
+      <EffectTargetDialog
+        open={leaderSkillTargetPhase && leaderSkillTarget?.sourcePlayerIndex === mySeat}
+        heroName={game.players[mySeat]?.leader?.name ?? 'Leader'}
+        sourcePlayerName={game.players[mySeat]?.name ?? ''}
+        options={game.players
+          .map((p, i) => ({ playerIndex: i, label: p.name }))
+          .filter(({ playerIndex }) => playerIndex !== mySeat)}
+        onChoose={handleSelectLeaderSkillTarget}
+      />
+
+      {/* Leader 101: free +1 / -1 after playing any modifier */}
+      <ModifierChoiceDialog
+        cardName={game.players[game.pendingLeaderModifierBonus?.playerIndex]?.leader?.name ?? ''}
+        options={[{ label: '+1', delta: 1 }, { label: '-1', delta: -1 }]}
+        open={game.pendingLeaderModifierBonus !== null && game.pendingLeaderModifierBonus?.playerIndex === mySeat}
+        onChoose={(index) => handleLeaderModifierBonus(index === 0 ? 1 : -1)}
+        onCancel={() => {}}
+      />
+
+      {/* Leader 104: draw a card after playing a Magic card */}
+      {leaderWizardDrawPhase && game.pendingLeaderWizardDraw?.playerIndex === mySeat && (
+        <div className="wizard-draw-overlay">
+          <div className="wizard-draw-modal">
+            <div className="wizard-draw-title">🧙 Wizard Leader Bonus</div>
+            <div className="wizard-draw-desc">You played a Magic card. Draw 1 card?</div>
+            <div className="wizard-draw-actions">
+              <button className="wizard-draw-btn wizard-draw-yes" onClick={() => handleLeaderWizardDraw(true)}>Draw</button>
+              <button className="wizard-draw-btn wizard-draw-no" onClick={() => handleLeaderWizardDraw(false)}>Pass</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <EffectTargetDialog
         open={targetSelectionPhase && effectSel !== null && effectSel.sourcePlayerIndex === mySeat}
         heroName={effectSel?.heroName ?? ''}
@@ -1529,6 +1646,27 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
           challengePassDisabled={challengePassDisabled}
           modifierPassDisabled={modifierPassDisabled}
         />
+
+        {/* Active leader skill button (e.g. leader 102) */}
+        {isMyTurn && !gameOver && (() => {
+          const myLeader = game.players[mySeat]?.leader
+          const ACTIVE_SKILL_IDS = ['leaderActivePull']
+          if (!myLeader?.effectId || !ACTIVE_SKILL_IDS.includes(myLeader.effectId)) return null
+          const canUse = !interruptPhase && game.actionPoints >= 1
+          return (
+            <div className="leader-skill-bar">
+              <button
+                type="button"
+                className="game-actions__btn"
+                disabled={!canUse}
+                onClick={handleActivateLeaderSkill}
+                title={myLeader.effect}
+              >
+                {myLeader.name}: Use Skill (1 AP)
+              </button>
+            </div>
+          )
+        })()}
 
         {debugMode && (
           <DebugPanel onDraw={handleDebugDraw} lastMessage={debugMessage} />

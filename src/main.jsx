@@ -11,7 +11,8 @@ let rootEl
 if (room !== null && seat !== null) {
   const config = loadRoomConfig(room)
   const playerCount = config?.playerCount ?? 3
-  rootEl = <App roomCode={room} mySeat={seat} playerCount={playerCount} />
+  const debugBot = config?.debugBot ?? false
+  rootEl = <App roomCode={room} mySeat={seat} playerCount={playerCount} debugBot={debugBot} />
 } else {
   rootEl = <LobbyScreen />
 }

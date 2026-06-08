@@ -8,11 +8,16 @@ function LobbyScreen() {
   const [links, setLinks] = useState([])
   const [copied, setCopied] = useState({})
 
+  const isDebugMode = playerCount === 'debug1'
+
   function handleCreateRoom() {
     const code = generateRoomCode()
-    saveRoomConfig(code, { playerCount })
+    const effectivePlayerCount = isDebugMode ? 2 : playerCount
+    saveRoomConfig(code, { playerCount: effectivePlayerCount, debugBot: isDebugMode })
     const base = `${window.location.origin}${window.location.pathname}`
-    const generated = Array.from({ length: playerCount }, (_, i) =>
+    // In debug mode only 1 real player link (seat 0)
+    const seatCount = isDebugMode ? 1 : effectivePlayerCount
+    const generated = Array.from({ length: seatCount }, (_, i) =>
       `${base}?room=${code}&seat=${i}`
     )
     setRoomCode(code)
@@ -47,6 +52,14 @@ function LobbyScreen() {
                 {n}
               </button>
             ))}
+            <button
+              type="button"
+              className={`lobby__player-btn${playerCount === 'debug1' ? ' lobby__player-btn--active' : ''}`}
+              onClick={() => setPlayerCount('debug1')}
+              title="1 human vs bot — infinite AP, bot always passes"
+            >
+              Debug 1
+            </button>
           </div>
         </div>
 
