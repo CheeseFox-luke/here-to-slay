@@ -11,6 +11,8 @@ import EffectTargetDialog from './components/EffectTargetDialog.jsx'
 import ModifierChoiceDialog from './components/ModifierChoiceDialog.jsx'
 import ModifierTargetDialog from './components/ModifierTargetDialog.jsx'
 import RollFeedback from './components/RollFeedback.jsx'
+import ActionConsole from './components/ActionConsole.jsx'
+import ApStatusBadge from './components/ApStatusBadge.jsx'
 import SkillConfirmDialog from './components/SkillConfirmDialog.jsx'
 import { CARD_BACKS, CARD_TYPES } from './data/cardUtils.js'
 import {
@@ -21,7 +23,6 @@ import {
 import { getModifierEffect } from './data/modifierEffects.js'
 import { canDrawFromMainDeck } from './deckHelpers.js'
 import {
-  ATTACK_MONSTER_ACTION_NAME,
   RESTOCK_HAND_ACTION_NAME,
   attackMonster,
   confirmHeroPlayChoice,
@@ -89,9 +90,17 @@ import {
   DRAW_CARD_AP_COST,
   MODIFIER_WINDOW_MS,
   RESTOCK_HAND_AP_COST,
+  INITIAL_ACTION_POINTS,
   initGame,
 } from './gameState.js'
 import { saveGameState, loadGameState, connectToRoom } from './roomSync.js'
+import {
+  getActionConsoleMode,
+  handHasPlayableChallenge,
+  handHasPlayableModifier,
+  NO_CHALLENGE_CARD_HINT,
+  NO_MODIFIER_CARD_HINT,
+} from './actionConsoleHelpers.js'
 import './App.css'
 
 function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
@@ -123,6 +132,10 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   const [itemEquipIsCursed, setItemEquipIsCursed] = useState(false)
   const [debugMode, setDebugMode] = useState(() => loadDebugModeEnabled())
   const [debugMessage, setDebugMessage] = useState(
+    /** @type {string | null} */ (null),
+  )
+  /** 需求 5：手牌先选中，再点 Play / Challenge / Modify 才真正打出 */
+  const [selectedHandCardId, setSelectedHandCardId] = useState(
     /** @type {string | null} */ (null),
   )
 
@@ -234,6 +247,16 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     return () => window.clearTimeout(timer)
   }, [game?.pendingRoll, displayRoll])
 
+  useEffect(() => {
+    setSelectedHandCardId(null)
+  }, [game?.pendingChallenge, game?.pendingRoll])
+
+  useEffect(() => {
+    setSelectedHandCardId(null)
+    setItemEquipInstanceId(null)
+    setItemEquipIsCursed(false)
+  }, [game?.currentPlayerIndex])
+
   // — Null guard: non-host tabs show this until host saves initial game to localStorage —
   if (!game) {
     return (
@@ -322,9 +345,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     game.actionPoints >= ATTACK_MONSTER_AP_COST
   const topDiscard = game.discardPile[game.discardPile.length - 1]
   const challengeAttackerIndex = getChallengeAttackerIndex(game)
-  const challengeAttacker =
-    challengeAttackerIndex >= 0 ? game.players[challengeAttackerIndex] : null
-  const stagedCard = game.pendingChallenge?.stagedPlay?.card
+  const actionConsoleMode = getActionConsoleMode(game, mySeat)
+  const challengePassDisabled = (game.challengePassedBy ?? []).includes(mySeat)
+  const modifierPassDisabled = (game.modifierPassedBy ?? []).includes(mySeat)
 
   const rollToShow = game.pendingRoll ?? displayRoll
 
@@ -355,7 +378,17 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     : null
 
 
-  function handlePlayCard(card, playerIndex) {
+  function toggleHandCardSelection(card, playerIndex) {
+    if (!isPlayableFromHand(card, game, playerIndex)) {
+      return
+    }
+    setSelectedHandCardId((prev) =>
+      prev === card.instanceId ? null : card.instanceId,
+    )
+  }
+
+  /** 特殊阶段仍直接打出；回合内 / Challenge / Modify 仅选中 */
+  function handleHandCardClick(card, playerIndex) {
     if (heroFromHandPlayPhase && heroFromHandPlay) {
       if (playerIndex !== heroFromHandPlay.sourcePlayerIndex) {
         return
@@ -417,15 +450,25 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
 
-    if (challengePhase) {
-      if (card.type === CARD_TYPES.CHALLENGE) {
-        handleChallengeClick(card, playerIndex)
+    if (itemEquipInstanceId) {
+      if (card.instanceId === itemEquipInstanceId) {
+        setItemEquipInstanceId(null)
+        setItemEquipIsCursed(false)
       }
       return
     }
 
+    if (challengePhase) {
+      if (playerIndex !== mySeat) return
+      if (card.type !== CARD_TYPES.CHALLENGE) return
+      toggleHandCardSelection(card, playerIndex)
+      return
+    }
+
     if (modifierPhase) {
-      handleModifierClick(card, playerIndex)
+      if (playerIndex !== mySeat) return
+      if (card.type !== CARD_TYPES.MODIFIER) return
+      toggleHandCardSelection(card, playerIndex)
       return
     }
 
@@ -433,15 +476,37 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
 
+    if (interruptPhase || game.actionPoints <= 0 || gameOver) {
+      return
+    }
+
+    toggleHandCardSelection(card, playerIndex)
+  }
+
+  function handleConsolePlay() {
+    const card = game.players[mySeat].hand.find(
+      (c) => c.instanceId === selectedHandCardId,
+    )
+    if (!card) {
+      window.alert('Select a card in your hand first.')
+      return
+    }
+    if (!isPlayableFromHand(card, game, mySeat)) {
+      window.alert('Cannot play this card now.')
+      return
+    }
+
     if (card.type === CARD_TYPES.ITEM) {
       setItemEquipInstanceId(card.instanceId)
       setItemEquipIsCursed(false)
+      setSelectedHandCardId(null)
       return
     }
 
     if (card.type === CARD_TYPES.CURSED_ITEM) {
       setItemEquipInstanceId(card.instanceId)
       setItemEquipIsCursed(true)
+      setSelectedHandCardId(null)
       return
     }
 
@@ -451,7 +516,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
     setGame(nextGame)
+    setSelectedHandCardId(null)
     setItemEquipInstanceId(null)
+    setItemEquipIsCursed(false)
   }
 
   function handleChallengeClick(card, playerIndex) {
@@ -470,6 +537,30 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     }
   }
 
+  function handleConsoleChallenge() {
+    const card = game.players[mySeat].hand.find(
+      (c) => c.instanceId === selectedHandCardId,
+    )
+    if (!card || card.type !== CARD_TYPES.CHALLENGE) {
+      window.alert('Select a Challenge card in your hand first.')
+      return
+    }
+    handleChallengeClick(card, mySeat)
+    setSelectedHandCardId(null)
+  }
+
+  function handleConsoleModify() {
+    const card = game.players[mySeat].hand.find(
+      (c) => c.instanceId === selectedHandCardId,
+    )
+    if (!card || card.type !== CARD_TYPES.MODIFIER) {
+      window.alert('Select a Modifier card in your hand first.')
+      return
+    }
+    handleModifierClick(card, mySeat)
+    setSelectedHandCardId(null)
+  }
+
   function handlePassChallenge() {
     const { game: nextGame, diceRoll, error } = passChallengeWindow(game, mySeat)
     if (error) {
@@ -477,6 +568,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
       return
     }
     setGame(nextGame)
+    setSelectedHandCardId(null)
     if (diceRoll) {
       setDisplayRoll(diceRoll)
     }
@@ -606,6 +698,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
   function handlePassModifier() {
     const { game: nextGame, diceRoll } = passModifierPhaseWithResult(game, mySeat)
     setGame(nextGame)
+    setSelectedHandCardId(null)
     setModifierChoice(null)
     setModifierTargetChoice(null)
     if (diceRoll) {
@@ -876,6 +969,99 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
     setSkillDialog(null)
   }
 
+  const selectedHandCard = selectedHandCardId
+    ? game.players[mySeat].hand.find((c) => c.instanceId === selectedHandCardId)
+    : null
+
+  const stagedChallengeCard = game.pendingChallenge?.stagedPlay?.card
+
+  /** 操作台仅保留：Challenge 窗 attacker 等待（其余状态改到别处展示） */
+  const challengeAttackerWaiting =
+    actionConsoleMode === 'challenge-wait' ? (
+      <>
+        You played <strong>{stagedChallengeCard?.name ?? 'a card'}</strong>. Waiting for
+        opponents to Challenge or Pass…{' '}
+        <strong>({challengeSecondsLeft}s)</strong>
+      </>
+    ) : null
+
+  let missingCardHint = null
+  if (
+    actionConsoleMode === 'challenge-respond' &&
+    !challengePassDisabled &&
+    !handHasPlayableChallenge(game, mySeat)
+  ) {
+    missingCardHint = NO_CHALLENGE_CARD_HINT
+  } else if (
+    actionConsoleMode === 'modifier-respond' &&
+    !modifierPassDisabled &&
+    !handHasPlayableModifier(game, mySeat)
+  ) {
+    missingCardHint = NO_MODIFIER_CARD_HINT
+  }
+
+  const canConsolePlay =
+    actionConsoleMode === 'turn' &&
+    Boolean(
+      selectedHandCard &&
+        isPlayableFromHand(selectedHandCard, game, mySeat),
+    ) &&
+    isMyTurn &&
+    game.actionPoints > 0 &&
+    !interruptPhase &&
+    !itemEquipInstanceId &&
+    !gameOver
+
+  const canConsoleChallenge =
+    Boolean(
+      selectedHandCard &&
+        selectedHandCard.type === CARD_TYPES.CHALLENGE &&
+        isPlayableFromHand(selectedHandCard, game, mySeat),
+    ) && handHasPlayableChallenge(game, mySeat)
+
+  const canConsoleModify =
+    Boolean(
+      selectedHandCard &&
+        selectedHandCard.type === CARD_TYPES.MODIFIER &&
+        isPlayableFromHand(selectedHandCard, game, mySeat),
+    ) && handHasPlayableModifier(game, mySeat)
+
+  const opponentEntries = game.players
+    .map((player, playerIndex) => ({ player, playerIndex }))
+    .filter(({ playerIndex }) => playerIndex !== mySeat)
+  const leftOpponents = opponentEntries.slice(0, 2)
+  const rightOpponents = opponentEntries.slice(2)
+
+  function renderOpponentPanel({ player, playerIndex }) {
+    const iAmSelecting = heroSelectionPhase && heroSelection?.sourcePlayerIndex === mySeat
+    const partyClickableForSelection = iAmSelecting && isPartyClickableForSelection(game, playerIndex)
+    const iAmTargeting = heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection?.sourcePlayerIndex === mySeat
+    const partyClickableForHeroTarget = iAmTargeting && isPartyClickableForHeroTargetSelection(game, playerIndex)
+    const selectionMode = partyClickableForSelection
+      ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
+      : null
+    const iAmQiBear = qiBearPhase && qiBearSel?.sourcePlayerIndex === mySeat
+    const canEquipCursedHere = itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed
+    const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat && itemSelection?.kind !== 'holyCurselifter'
+    return (
+      <CompactPlayerPanel
+        key={player.id}
+        player={player}
+        isCurrent={playerIndex === game.currentPlayerIndex}
+        onHeroSkillClick={(hero) => handleHeroSkillClick(hero, playerIndex)}
+        heroSkillClickable={partyClickableForSelection || partyClickableForHeroTarget}
+        allowHeroClickWhenSkillUsed={partyClickableForSelection || partyClickableForHeroTarget}
+        onHeroEquipClick={canEquipCursedHere ? handleHeroEquipClick : undefined}
+        heroEquipSelectable={canEquipCursedHere}
+        selectionMode={selectionMode}
+        pendingDestroyMode={iAmQiBear || partyClickableForHeroTarget}
+        pendingDestroyIds={game.pendingDestroyTargets}
+        onItemClick={iAmItemSelecting ? handleItemClick : undefined}
+        itemsSelectable={iAmItemSelecting}
+      />
+    )
+  }
+
   return (
     <div className="game-layout">
       {/* Victory overlay */}
@@ -900,59 +1086,6 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
         attackerName={challengeAttackerName}
         challengerName={challengeChallengerName}
       />
-
-      {challengePhase && !modifierPhase && (
-        <div className="modifier-phase-bar challenge-phase-bar">
-          {mySeat === challengeAttackerIndex ? (
-            /* The player who played the card: just waits */
-            <p className="challenge-phase-bar__text">
-              You played <strong>{stagedCard?.name ?? 'a card'}</strong>.
-              Waiting for opponents to challenge or pass…
-            </p>
-          ) : (
-            /* All other players: can challenge or pass */
-            <>
-              <p className="challenge-phase-bar__text">
-                <strong>{challengeAttacker?.name ?? currentPlayer.name}</strong> played{' '}
-                <strong>{stagedCard?.name ?? 'a card'}</strong>.
-                Play a <strong>Challenge card</strong> to oppose, or Pass.
-                {(game.challengePassedBy ?? []).length > 0 && (
-                  <span className="status-warn">
-                    {' '}Passed: {(game.challengePassedBy ?? []).map((i) => game.players[i]?.name).join(', ')}
-                  </span>
-                )}
-              </p>
-              {!(game.challengePassedBy ?? []).includes(mySeat) && (
-                <button
-                  type="button"
-                  className="game-actions__btn game-actions__btn--primary"
-                  onClick={handlePassChallenge}
-                >
-                  Pass (no challenge)
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {modifierPhase && (
-        <div className="modifier-phase-bar">
-          {(game.modifierPassedBy ?? []).length > 0 && (
-            <span className="challenge-phase-bar__text">
-              Passed: {(game.modifierPassedBy ?? []).map((i) => game.players[i]?.name).join(', ')}
-            </span>
-          )}
-          <button
-            type="button"
-            className="game-actions__btn game-actions__btn--primary"
-            onClick={handlePassModifier}
-            disabled={(game.modifierPassedBy ?? []).includes(mySeat)}
-          >
-            {(game.modifierPassedBy ?? []).includes(mySeat) ? 'Passed' : 'Pass'}
-          </button>
-        </div>
-      )}
 
       {stagedCardPickPhase && stagedCardPick && (
         <div className="modifier-phase-bar challenge-phase-bar">
@@ -1312,64 +1445,30 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
         onChoose={handleSelectEffectTarget}
       />
 
-      {/* Top: opponent panels */}
-      <div className="game-opponents">
-        {game.players
-          .map((player, playerIndex) => ({ player, playerIndex }))
-          .filter(({ playerIndex }) => playerIndex !== mySeat)
-          .map(({ player, playerIndex }) => {
-            // Only MY interactions are enabled — check mySeat is the source player
-            const iAmSelecting = heroSelectionPhase && heroSelection?.sourcePlayerIndex === mySeat
-            const partyClickableForSelection = iAmSelecting && isPartyClickableForSelection(game, playerIndex)
-            const iAmTargeting = heroTargetSelectionPhase && game.pendingEffectHeroTargetSelection?.sourcePlayerIndex === mySeat
-            const partyClickableForHeroTarget = iAmTargeting && isPartyClickableForHeroTargetSelection(game, playerIndex)
-            const selectionMode = partyClickableForSelection
-              ? (heroSelection?.action === 'swapSource' || heroSelection?.action === 'swapTarget' ? 'swap' : heroSelection?.action ?? null)
-              : null
-            // QiBear: only the source player can mark heroes to destroy on opponent parties
-            const iAmQiBear = qiBearPhase && qiBearSel?.sourcePlayerIndex === mySeat
-            // Item equip cursed: I (mySeat) equip a cursed item on an opponent hero
-            const canEquipCursedHere = itemEquipInstanceId !== null && !heroSelectionPhase && itemEquipIsCursed
-            // Item selection: only source player clicks items; Holy Curselifter restricts to own party
-            const iAmItemSelecting = itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat && itemSelection?.kind !== 'holyCurselifter'
-            return (
-              <CompactPlayerPanel
-                key={player.id}
-                player={player}
-                isCurrent={playerIndex === game.currentPlayerIndex}
-                onHeroSkillClick={(hero) => handleHeroSkillClick(hero, playerIndex)}
-                heroSkillClickable={partyClickableForSelection || partyClickableForHeroTarget}
-                allowHeroClickWhenSkillUsed={partyClickableForSelection || partyClickableForHeroTarget}
-                onHeroEquipClick={canEquipCursedHere ? handleHeroEquipClick : undefined}
-                heroEquipSelectable={canEquipCursedHere}
-                selectionMode={selectionMode}
-                pendingDestroyMode={iAmQiBear || partyClickableForHeroTarget}
-                pendingDestroyIds={game.pendingDestroyTargets}
-                onItemClick={iAmItemSelecting ? handleItemClick : undefined}
-                itemsSelectable={iAmItemSelecting}
-              />
-            )
-          })
-        }
-      </div>
+      <div className="game-main">
+        {leftOpponents.length > 0 && (
+          <div className="game-opponents-left">
+            {leftOpponents.map(renderOpponentPanel)}
+          </div>
+        )}
 
-      {/* Middle: game table */}
-      <div className="game-table">
+        <div className="game-main-deck-corner" id="main-deck-deal-origin">
+          <DeckPile
+            count={game.mainDeck.length}
+            backImageUrl={game.mainDeck[0]?.backImageUrl ?? CARD_BACKS.MAIN}
+            label="Main deck"
+            variant="main"
+            showCount={false}
+          />
+        </div>
 
-        {/* Left: deck piles */}
-        <div className="game-table__left">
-          <section className="table-section table-section--deck">
-            <h3>Main deck</h3>
-            <DeckPile
-              count={game.mainDeck.length}
-              backImageUrl={game.mainDeck[0]?.backImageUrl ?? CARD_BACKS.MAIN}
-              label="Main deck"
-              variant="main"
-            />
-            {game.discardPile.length > 0 && (
-              <p className="deck-recycle-hint">Discard: {game.discardPile.length}</p>
-            )}
-          </section>
+        {rightOpponents.length > 0 && (
+          <div className="game-opponents-right">
+            {rightOpponents.map(renderOpponentPanel)}
+          </div>
+        )}
+
+        <div className="game-monster-zone">
           <section className="table-section table-section--deck">
             <h3>Monster deck</h3>
             <DeckPile
@@ -1379,17 +1478,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
               variant="monster"
             />
           </section>
-        </div>
-
-        {/* Center: active monsters */}
-        <div className="game-table__center">
-          <section className="table-section">
-            <h3>Active monsters</h3>
-            <p className="table-hint">
-              {canAttackMonster
-                ? `Click to ${ATTACK_MONSTER_ACTION_NAME} (${ATTACK_MONSTER_AP_COST} AP)`
-                : 'Attack costs 2 AP on your turn'}
-            </p>
+          <section className="table-section table-section--active-monsters">
             <ActiveMonsters
               monsters={game.activeMonsters}
               onAttack={handleAttackMonster}
@@ -1398,86 +1487,45 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
           </section>
         </div>
 
-        {/* Right: discard pile */}
-        <div className="game-table__right">
-          <section className="table-section">
-            <h3>Discard</h3>
-            {game.discardPile.length === 0
-              ? <p className="discard-pile__empty">Empty</p>
-              : (
-                <div className="discard-pile">
-                  <CardDisplay card={topDiscard} faceUp />
-                  <span className="discard-pile__count">{game.discardPile.length}</span>
-                </div>
-              )
+        <div className="game-table-zone">
+          <ApStatusBadge
+            actionPoints={game.actionPoints}
+            maxActionPoints={INITIAL_ACTION_POINTS}
+            turnLine={
+              isMyTurn ? 'Your turn' : `${currentPlayer?.name ?? 'Player'}'s turn`
             }
-          </section>
+            isMyTurn={isMyTurn}
+          />
         </div>
       </div>
 
       {/* Bottom: my section */}
       <div className="game-my-section">
-
-        {/* Status + action buttons */}
-        <div className="my-section__header">
-          <p className="my-section__status">
-            Turn: <strong>{currentPlayer.name}</strong> · AP: <strong>{game.actionPoints}</strong>/3
-            {itemEquipInstanceId && (
-              <span className="status-warn">
-                {' '}— {itemEquipIsCursed
-                  ? 'Click opponent hero to equip cursed item'
-                  : 'Click your hero to equip item'}
-              </span>
-            )}
-            {challengePhase && !modifierPhase && (
-              <span className="status-warn"> — Challenge window</span>
-            )}
-            {modifierPhase && (
-              <span className="status-warn"> — Modifier window</span>
-            )}
-            {targetSelectionPhase && (
-              <span className="status-warn"> — Pick a target</span>
-            )}
-            {pendingDiscardPhase && (
-              <span className="status-warn"> — Discard {pendingDiscard?.count}</span>
-            )}
-          </p>
-          <div className="my-section__actions">
-            <button
-              type="button"
-              className="game-actions__btn"
-              onClick={handleDrawCard}
-              disabled={!canDraw}
-              title={`Costs ${DRAW_CARD_AP_COST} AP`}
-            >
-              Draw ({DRAW_CARD_AP_COST} AP)
-            </button>
-            <button
-              type="button"
-              className="game-actions__btn"
-              onClick={handleRestockHand}
-              disabled={!canRestock}
-              title={`Costs ${RESTOCK_HAND_AP_COST} AP`}
-            >
-              {RESTOCK_HAND_ACTION_NAME} ({RESTOCK_HAND_AP_COST} AP)
-            </button>
-            <button
-              type="button"
-              className="game-actions__btn game-actions__btn--primary"
-              onClick={handleEndTurn}
-              disabled={interruptPhase || !isMyTurn || gameOver}
-            >
-              End turn
-            </button>
-            <button
-              type="button"
-              className={`game-actions__btn debug-toggle${debugMode ? ' debug-toggle--on' : ''}`}
-              onClick={handleToggleDebugMode}
-            >
-              Debug {debugMode ? 'ON' : 'OFF'}
-            </button>
-          </div>
-        </div>
+        <ActionConsole
+          mode={actionConsoleMode}
+          challengeAttackerWaiting={challengeAttackerWaiting}
+          missingCardHint={missingCardHint}
+          debugMode={debugMode}
+          onToggleDebug={handleToggleDebugMode}
+          canDraw={canDraw}
+          canRestock={canRestock}
+          canEndTurn={!interruptPhase && isMyTurn && !gameOver}
+          restockLabel={RESTOCK_HAND_ACTION_NAME}
+          onDraw={handleDrawCard}
+          onRestock={handleRestockHand}
+          onEndTurn={handleEndTurn}
+          canPlayCard={canConsolePlay}
+          onPlayCard={handleConsolePlay}
+          canConsoleChallenge={canConsoleChallenge}
+          canConsoleModify={canConsoleModify}
+          hasSelection={selectedHandCardId !== null}
+          onConsoleChallenge={handleConsoleChallenge}
+          onConsoleModify={handleConsoleModify}
+          onPassChallenge={handlePassChallenge}
+          onPassModifierClick={handlePassModifier}
+          challengePassDisabled={challengePassDisabled}
+          modifierPassDisabled={modifierPassDisabled}
+        />
 
         {debugMode && (
           <DebugPanel onDraw={handleDebugDraw} lastMessage={debugMessage} />
@@ -1485,7 +1533,61 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
 
         {/* My party + hand */}
         <div className="my-section__board">
-          {/* Compact panel for my party */}
+          <div className="my-section__corner my-section__corner--discard">
+            <section className="table-section table-section--discard">
+              <h3 className="table-section__title-row">
+                Discard
+                <span className="discard-pile__count">{game.discardPile.length}</span>
+              </h3>
+              {game.discardPile.length === 0
+                ? <p className="discard-pile__empty">Empty</p>
+                : (
+                  <div className="discard-pile">
+                    <CardDisplay card={topDiscard} faceUp />
+                  </div>
+                )
+              }
+            </section>
+          </div>
+          <div className="my-section__strip">
+          <div className="my-section__hand-area">
+            <div className="card-row hand-row">
+              {game.players[mySeat].hand.length === 0
+                ? <p className="hand-empty">Empty hand</p>
+                : game.players[mySeat].hand.map((card) => {
+                    const playable = isPlayableFromHand(card, game, mySeat)
+                    const enabled = pendingDiscardPhase
+                      ? playable
+                      : pendingGivePhase ? playable
+                      : heroFromHandPlayPhase ? playable
+                      : heroTargetSelectionPhase ? false
+                      : targetSelectionPhase ? false
+                      : modifierPhase
+                      ? playable && card.type === CARD_TYPES.MODIFIER
+                      : challengePhase
+                      ? mySeat !== challengeAttackerIndex && playable && card.type === CARD_TYPES.CHALLENGE
+                      : itemEquipInstanceId
+                      ? card.instanceId === itemEquipInstanceId
+                      : isMyTurn && !interruptPhase && game.actionPoints > 0 && !gameOver && playable
+                    const isSelected =
+                      selectedHandCardId === card.instanceId ||
+                      itemEquipInstanceId === card.instanceId
+                    return (
+                      <button
+                        key={card.instanceId}
+                        type="button"
+                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && mySeat !== challengeAttackerIndex && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelected ? ' hand-card--selected' : ''}`}
+                        onClick={() => handleHandCardClick(card, mySeat)}
+                        disabled={!enabled && !isSelected}
+                      >
+                        <CardDisplay card={card} faceUp={card.faceUp ?? true} />
+                      </button>
+                    )
+                  })
+              }
+            </div>
+          </div>
+
           <CompactPlayerPanel
             player={game.players[mySeat]}
             isCurrent={mySeat === game.currentPlayerIndex}
@@ -1516,64 +1618,6 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
             onItemClick={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat ? handleItemClick : undefined}
             itemsSelectable={itemSelectionPhase && itemSelection?.sourcePlayerIndex === mySeat}
           />
-
-          {/* My hand */}
-          <div className="my-section__hand-area">
-            <h3 className="hand-heading">Hand</h3>
-            <p className="game-section__hint">
-              {heroSelectionPhase && heroSelection
-                ? mySeat === heroSelection.sourcePlayerIndex
-                  ? `Pick a hero to ${heroSelection.action}.`
-                  : `Waiting for ${game.players[heroSelection.sourcePlayerIndex]?.name} to pick a hero.`
-                : pendingDiscardPhase
-                  ? mySeat === pendingDiscard.playerIndex
-                    ? `Discard ${pendingDiscard.count} card${pendingDiscard.count === 1 ? '' : 's'}: click below.`
-                    : 'Waiting for opponent to discard.'
-                  : modifierPhase
-                    ? 'Any player: play Modifiers, or Pass.'
-                    : challengePhase
-                      ? mySeat !== challengeAttackerIndex
-                        ? 'Play a Challenge card, or wait.'
-                        : 'Waiting for opponents — or Pass above.'
-                      : mySeat === game.currentPlayerIndex
-                        ? 'Hero/Magic (1 AP). Item: click item then hero. Draw (1 AP). Restock (3 AP).'
-                        : 'Waiting for your turn.'}
-            </p>
-            <div className="card-row hand-row">
-              {game.players[mySeat].hand.length === 0
-                ? <p className="hand-empty">Empty hand</p>
-                : game.players[mySeat].hand.map((card) => {
-                    const playable = isPlayableFromHand(card, game, mySeat)
-                    const enabled = pendingDiscardPhase
-                      ? playable
-                      : pendingGivePhase ? playable
-                      : heroFromHandPlayPhase ? playable
-                      : heroTargetSelectionPhase ? false
-                      : targetSelectionPhase ? false
-                      : modifierPhase ? playable
-                      // During challenge phase: only non-attackers can play challenge cards
-                      : challengePhase ? (mySeat !== challengeAttackerIndex && playable)
-                      : isMyTurn && (itemEquipInstanceId ? itemEquipInstanceId === card.instanceId : canPlay && playable)
-                    const isSelectedItem = itemEquipInstanceId === card.instanceId
-                    return (
-                      <button
-                        key={card.instanceId}
-                        type="button"
-                        className={`hand-card${enabled ? ' hand-card--playable' : ''}${modifierPhase && card.type === CARD_TYPES.MODIFIER ? ' hand-card--modifier' : ''}${challengePhase && mySeat !== challengeAttackerIndex && card.type === CARD_TYPES.CHALLENGE ? ' hand-card--challenge' : ''}${pendingDiscardPhase && enabled ? ' hand-card--discard' : ''}${isSelectedItem ? ' hand-card--selected' : ''}`}
-                        onClick={() => {
-                          if (!pendingDiscardPhase && itemEquipInstanceId && card.instanceId === itemEquipInstanceId) {
-                            setItemEquipInstanceId(null); setItemEquipIsCursed(false); return
-                          }
-                          handlePlayCard(card, mySeat)
-                        }}
-                        disabled={!enabled && !isSelectedItem}
-                      >
-                        <CardDisplay card={card} faceUp={card.faceUp ?? true} />
-                      </button>
-                    )
-                  })
-              }
-            </div>
           </div>
         </div>
       </div>

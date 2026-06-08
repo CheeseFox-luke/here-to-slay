@@ -6,9 +6,16 @@ import './DeckPile.css'
  *   backImageUrl: string
  *   label?: string
  *   variant?: 'main' | 'monster'
+ *   showCount?: boolean
  * }} props
  */
-function DeckPile({ count, backImageUrl, label = 'Deck', variant = 'main' }) {
+function DeckPile({
+  count,
+  backImageUrl,
+  label = 'Deck',
+  variant = 'main',
+  showCount = true,
+}) {
   if (count === 0) {
     return <p className="deck-pile deck-pile--empty">Empty</p>
   }
@@ -26,7 +33,7 @@ function DeckPile({ count, backImageUrl, label = 'Deck', variant = 'main' }) {
           draggable={false}
         />
       </div>
-      <span className="deck-pile__count">{count}</span>
+      {showCount ? <span className="deck-pile__count">{count}</span> : null}
     </div>
   )
 }
