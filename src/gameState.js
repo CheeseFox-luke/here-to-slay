@@ -73,6 +73,7 @@ export function partyHasHero(partySlots) {
  * @property {string} [effect]
  * @property {boolean} [antiSteal] - hero-level: this hero cannot be selected as a STEAL target.
  * @property {boolean} [antiDestroy] - hero-level: this hero cannot be selected as a DESTROY target.
+ * @property {number} [heroTargetCount] - how many hero targets to select before rolling (default 1).
  */
 
 /**
@@ -264,6 +265,8 @@ export function partyHasHero(partySlots) {
  * @property {'own' | 'opponents' | 'any'} scope - which parties contain valid heroes
  * @property {string} [sourceHeroInstanceId] - instanceId of the hero whose skill
  *   triggered this selection (e.g. Tipsy Tootie itself, needed for swap).
+ * @property {number} [maxTargets] - how many heroes must be selected before the roll (default 1)
+ * @property {string[]} [selectedTargets] - instanceIds accumulated so far (multi-target only)
  */
 
 /**

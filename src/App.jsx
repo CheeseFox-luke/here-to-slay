@@ -1189,7 +1189,10 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3 }) {
           {mySeat === game.pendingEffectHeroTargetSelection.sourcePlayerIndex ? (
             <>
               <p className="challenge-phase-bar__text">
-                <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>: Click a hero to <strong>{heroTargetAction}</strong>.
+                <strong>{game.pendingEffectHeroTargetSelection.heroName}</strong>: Click a hero to <strong>{heroTargetAction}</strong>
+                {game.pendingEffectHeroTargetSelection.maxTargets > 1 && (
+                  <> ({(game.pendingEffectHeroTargetSelection.selectedTargets?.length ?? 0) + 1}/{game.pendingEffectHeroTargetSelection.maxTargets})</>
+                )}.
               </p>
               <button
                 type="button"

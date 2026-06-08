@@ -1077,41 +1077,24 @@ export function spookyEffect(game, { sourcePlayerIndex, sourceLabel = 'Spooky' }
 }
 
 /**
- * Fluffy (071): destroy 2 hero cards.
- * First destroy via heroTargets[0]; second via chained pendingHeroSelection.
+ * Fluffy (071): destroy 2 hero cards (both pre-selected via heroTargets[]).
  */
-export function fluffyEffect(game, { sourcePlayerIndex, heroTargets = [], sourceLabel = 'Fluffy' }) {
-  const heroInstanceId = heroTargets[0]
-  if (!heroInstanceId) return { game }
-
-  const ownerIndex = game.players.findIndex((p) =>
-    p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
-  )
-  if (ownerIndex === -1) return { game }
-
-  let afterFirst
-  if (ownerIndex === sourcePlayerIndex) {
-    const r = sacrifice(game, { playerIndex: ownerIndex, heroInstanceId })
-    afterFirst = r.game
-  } else {
-    const r = destroy(game, { sourcePlayerIndex, targetPlayerIndex: ownerIndex, heroInstanceId })
-    afterFirst = r.game
+export function fluffyEffect(game, { sourcePlayerIndex, heroTargets = [] }) {
+  let current = game
+  for (const heroInstanceId of heroTargets) {
+    const ownerIndex = current.players.findIndex((p) =>
+      p.partySlots.some((s) => s?.hero.instanceId === heroInstanceId),
+    )
+    if (ownerIndex === -1) continue
+    if (ownerIndex === sourcePlayerIndex) {
+      const r = sacrifice(current, { playerIndex: ownerIndex, heroInstanceId })
+      current = r.game
+    } else {
+      const r = destroy(current, { sourcePlayerIndex, targetPlayerIndex: ownerIndex, heroInstanceId })
+      current = r.game
+    }
   }
-
-  const anyHeroLeft = afterFirst.players.some((p) => p.partySlots.some((s) => s !== null))
-  if (!anyHeroLeft) return { game: afterFirst }
-
-  return {
-    game: {
-      ...afterFirst,
-      pendingHeroSelection: {
-        sourcePlayerIndex,
-        scope: 'any',
-        action: 'destroy',
-        sourceLabel,
-      },
-    },
-  }
+  return { game: current }
 }
 
 /**

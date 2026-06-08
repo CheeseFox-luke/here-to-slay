@@ -477,6 +477,9 @@ function resolveStagedPlay(game, staged) {
         rollRequirement: played.rollRequirement ?? 6,
         scope: played.heroTargetScope ?? 'any',
         sourceHeroInstanceId: played.instanceId,
+        ...(played.heroTargetCount && played.heroTargetCount > 1
+          ? { maxTargets: played.heroTargetCount, selectedTargets: [] }
+          : {}),
       }
     } else if (played.targeted && played.effectId) {
       // 先选玩家目标，再投骰
@@ -2052,7 +2055,52 @@ export function selectEffectHeroTarget(game, heroInstanceId) {
   )
   const targetHeroName = heroSlot?.hero.name ?? 'Hero'
 
-  // Target confirmed — roll dice and open modifier window
+  // Multi-target accumulation (e.g. Fluffy needs 2 targets before rolling)
+  const maxTargets = sel.maxTargets ?? 1
+  if (maxTargets > 1) {
+    const alreadySelected = sel.selectedTargets ?? []
+    if (alreadySelected.includes(heroInstanceId)) {
+      return { game, error: 'That hero is already selected.' }
+    }
+    const newSelected = [...alreadySelected, heroInstanceId]
+    if (newSelected.length < maxTargets) {
+      // Still need more targets — update selection state, highlight chosen heroes
+      return {
+        game: {
+          ...game,
+          pendingEffectHeroTargetSelection: { ...sel, selectedTargets: newSelected },
+          pendingDestroyTargets: newSelected,
+        },
+      }
+    }
+    // All targets collected — now roll
+    const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
+    const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
+    const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)
+    /** @type {PendingRoll} */
+    const pendingRoll = {
+      ...cursedRoll,
+      heroName: sel.heroName,
+      targetLabel: `${sel.heroName} → ${newSelected.length} heroes`,
+      effectId: sel.effectId,
+      effectSourcePlayerIndex: sel.sourcePlayerIndex,
+      sourceHeroInstanceId: sel.sourceHeroInstanceId,
+      rollingHeroInstanceId: sel.sourceHeroInstanceId,
+    }
+    return {
+      game: {
+        ...game,
+        pendingEffectHeroTargetSelection: null,
+        pendingDestroyTargets: newSelected,
+        pendingRoll,
+        modifierPassedBy: [],
+        modifierStartedAt: Date.now(),
+      },
+      pendingRoll,
+    }
+  }
+
+  // Single-target path (original behaviour)
   const baseRoll = rollForHeroEffect(sel.rollRequirement, sel.sourcePlayerIndex)
   const sourceItems = sel.sourceHeroInstanceId ? findHeroItems(game, sel.sourceHeroInstanceId) : []
   const cursedRoll = applyHeroRollCurses(baseRoll, sourceItems, game.globalRollBonus ?? 0)

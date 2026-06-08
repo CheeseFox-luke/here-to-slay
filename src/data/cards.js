@@ -47,6 +47,7 @@ export const HERO_ROLL_REQUIREMENT = 6
  *   targeted?: boolean,
  *   heroTargeted?: boolean,
  *   heroTargetScope?: 'own' | 'opponents' | 'any',
+ *   heroTargetCount?: number,
  *   effectId?: string,
  *   effect?: string,
  * }} [options]
@@ -58,6 +59,7 @@ function createHeroCard(id, filename, heroClass, options = {}) {
     targeted: options.targeted ?? false,
     heroTargeted: options.heroTargeted ?? false,
     ...(options.heroTargetScope ? { heroTargetScope: options.heroTargetScope } : {}),
+    ...(options.heroTargetCount && options.heroTargetCount > 1 ? { heroTargetCount: options.heroTargetCount } : {}),
     ...(options.effectId ? { effectId: options.effectId } : {}),
     ...(options.effect ? { effect: options.effect } : {}),
   }
@@ -203,43 +205,43 @@ export const heroCardsByClass = {
     }),
   ],
   [HERO_CLASSES.RANGER]: [
-    createHeroCard('051', 'HtS-Base-051-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+    createHeroCard('Sharp Fox', 'HtS-Base-051-Hero-Ranger.png', HERO_CLASSES.RANGER, {
       rollRequirement: 5,
       targeted: true,
       effectId: 'sharpFox',
       effect: "Look at another player's hand and pull one card.",
     }),
-    createHeroCard('052', 'HtS-Base-052-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+    createHeroCard('Wild Shot', 'HtS-Base-052-Hero-Ranger.png', HERO_CLASSES.RANGER, {
       rollRequirement: 8,
       effectId: 'wildshot',
       effect: 'Draw 3 cards and discard a card.',
     }),
-    createHeroCard('053', 'HtS-Base-053-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+    createHeroCard('Wily Red', 'HtS-Base-053-Hero-Ranger.png', HERO_CLASSES.RANGER, {
       rollRequirement: 10,
       effectId: 'wilyRed',
       effect: 'Draw cards until you have 7 cards in your hand.',
     }),
-    createHeroCard('054', 'HtS-Base-054-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+    createHeroCard('Lookie Rookie', 'HtS-Base-054-Hero-Ranger.png', HERO_CLASSES.RANGER, {
       rollRequirement: 5,
       effectId: 'lookieRookie',
       effect: 'Search the discard pile for an item card and add it to your hand.',
     }),
-    createHeroCard('055', 'HtS-Base-055-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+    createHeroCard('Bulls Eye', 'HtS-Base-055-Hero-Ranger.png', HERO_CLASSES.RANGER, {
       rollRequirement: 7,
       effectId: 'bullseye',
       effect: 'Look at the top 3 cards of the deck. Add one to your hand, then return the other two to the top in any order.',
     }),
-    createHeroCard('056', 'HtS-Base-056-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+    createHeroCard('Quick Draw', 'HtS-Base-056-Hero-Ranger.png', HERO_CLASSES.RANGER, {
       rollRequirement: 8,
       effectId: 'quickDraw',
       effect: 'Draw 2 cards. If at least one is an item card, you may play one of them immediately.',
     }),
-    createHeroCard('057', 'HtS-Base-057-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+    createHeroCard('Hook', 'HtS-Base-057-Hero-Ranger.png', HERO_CLASSES.RANGER, {
       rollRequirement: 6,
       effectId: 'hook',
       effect: 'Play an item card from your hand immediately and draw a card.',
     }),
-    createHeroCard('058', 'HtS-Base-058-Hero-Ranger.png', HERO_CLASSES.RANGER, {
+    createHeroCard('Serious Grey', 'HtS-Base-058-Hero-Ranger.png', HERO_CLASSES.RANGER, {
       rollRequirement: 9,
       heroTargeted: true,
       heroTargetScope: 'any',
@@ -248,51 +250,51 @@ export const heroCardsByClass = {
     }),
   ],
   [HERO_CLASSES.THIEF]: [
-    createHeroCard('059', 'HtS-Base-059-Hero-Thief.png', HERO_CLASSES.THIEF, {
+    createHeroCard('Smooth Minimeow', 'HtS-Base-059-Hero-Thief.png', HERO_CLASSES.THIEF, {
       rollRequirement: 7,
       effectId: 'smoothMinimeow',
       effect: "Pull a card from the hand of each other player with a Thief in their party.",
     }),
-    createHeroCard('060', 'HtS-Base-060-Hero-Thief.png', HERO_CLASSES.THIEF, {
+    createHeroCard('Plundering Puma', 'HtS-Base-060-Hero-Thief.png', HERO_CLASSES.THIEF, {
       rollRequirement: 6,
       targeted: true,
       effectId: 'plunderingPuma',
       effect: "Pull 2 cards from another player's hand. That player may Draw a card.",
     }),
-    createHeroCard('061', 'HtS-Base-061-Hero-Thief.png', HERO_CLASSES.THIEF, {
+    createHeroCard('Shurikitty', 'HtS-Base-061-Hero-Thief.png', HERO_CLASSES.THIEF, {
       rollRequirement: 9,
       heroTargeted: true,
       heroTargetScope: 'opponents',
       effectId: 'shurikitty',
       effect: "Destroy a hero card. If that hero is equipped with an item, that Item card will go to your hand instead of the discard pile.",
     }),
-    createHeroCard('062', 'HtS-Base-062-Hero-Thief.png', HERO_CLASSES.THIEF, {
+    createHeroCard('Meowzio', 'HtS-Base-062-Hero-Thief.png', HERO_CLASSES.THIEF, {
       rollRequirement: 10,
       heroTargeted: true,
       heroTargetScope: 'opponents',
       effectId: 'meowzio',
       effect: "Steal a hero, and pull a card from that player's hand.",
     }),
-    createHeroCard('063', 'HtS-Base-063-Hero-Thief.png', HERO_CLASSES.THIEF, {
+    createHeroCard('Slippery Paws', 'HtS-Base-063-Hero-Thief.png', HERO_CLASSES.THIEF, {
       rollRequirement: 6,
       targeted: true,
       effectId: 'slipperyPaws',
       effect: "Pull 2 cards from another player's hand, then add one into your hand; the other goes to the discard pile.",
     }),
-    createHeroCard('064', 'HtS-Base-064-Hero-Thief.png', HERO_CLASSES.THIEF, {
+    createHeroCard('Sly Pickings', 'HtS-Base-064-Hero-Thief.png', HERO_CLASSES.THIEF, {
       rollRequirement: 6,
       targeted: true,
       effectId: 'slyPickings',
       effect: "Pull a card from another player's hand. If that's an item card, you may play it immediately.",
     }),
-    createHeroCard('065', 'HtS-Base-065-Hero-Thief.png', HERO_CLASSES.THIEF, {
+    createHeroCard('Kit Napper', 'HtS-Base-065-Hero-Thief.png', HERO_CLASSES.THIEF, {
       rollRequirement: 9,
       heroTargeted: true,
       heroTargetScope: 'opponents',
       effectId: 'kitNapper',
       effect: "Steal a hero.",
     }),
-    createHeroCard('066', 'HtS-Base-066-Hero-Thief.png', HERO_CLASSES.THIEF, {
+    createHeroCard('Silent Shadow', 'HtS-Base-066-Hero-Thief.png', HERO_CLASSES.THIEF, {
       rollRequirement: 8,
       targeted: true,
       effectId: 'silentShadow',
@@ -300,49 +302,50 @@ export const heroCardsByClass = {
     }),
   ],
   [HERO_CLASSES.WIZARD]: [
-    createHeroCard('067', 'HtS-Base-067-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
+    createHeroCard('Snowball', 'HtS-Base-067-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
       rollRequirement: 6,
       effectId: 'snowball',
       effect: 'Draw a card. If it is a Magic card, you may play it immediately and draw another card.',
     }),
-    createHeroCard('068', 'HtS-Base-068-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
+    createHeroCard('Bun Bun', 'HtS-Base-068-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
       rollRequirement: 5,
       effectId: 'bunBun',
       effect: 'Search the discard pile for a Magic card and add it to your hand.',
     }),
-    createHeroCard('069', 'HtS-Base-069-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
+    createHeroCard('Wiggles', 'HtS-Base-069-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
       rollRequirement: 10,
       heroTargeted: true,
       heroTargetScope: 'opponents',
       effectId: 'wiggles',
       effect: 'Steal a hero card and roll to use its effect immediately.',
     }),
-    createHeroCard('070', 'HtS-Base-070-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
+    createHeroCard('Spooky', 'HtS-Base-070-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
       rollRequirement: 10,
       effectId: 'spooky',
       effect: 'Each other player must sacrifice a hero card.',
     }),
-    createHeroCard('071', 'HtS-Base-071-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
+    createHeroCard('Fluffy', 'HtS-Base-071-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
       rollRequirement: 10,
       heroTargeted: true,
       heroTargetScope: 'any',
+      heroTargetCount: 2,
       effectId: 'fluffy',
       effect: 'Destroy 2 hero cards.',
     }),
-    createHeroCard('072', 'HtS-Base-072-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
+    createHeroCard('Buttons', 'HtS-Base-072-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
       rollRequirement: 6,
       targeted: true,
       effectId: 'buttons',
       effect: "Pull a card from another player's hand. If that card is a Magic card, you may play it immediately.",
     }),
-    createHeroCard('073', 'HtS-Base-073-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
+    createHeroCard('Whiskers', 'HtS-Base-073-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
       rollRequirement: 11,
       heroTargeted: true,
       heroTargetScope: 'opponents',
       effectId: 'whiskers',
       effect: 'Steal a hero card and destroy a hero card.',
     }),
-    createHeroCard('074', 'HtS-Base-074-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
+    createHeroCard('Hopper', 'HtS-Base-074-Hero-Wizard.png', HERO_CLASSES.WIZARD, {
       rollRequirement: 7,
       heroTargeted: true,
       heroTargetScope: 'opponents',
