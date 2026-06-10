@@ -2522,7 +2522,6 @@ export function confirmQiBearSelection(game, sourcePlayerIndex) {
 }
 
 /**
-/**
  * Cancel the current hero selection (destroy/steal/swap) without doing anything.
  * @param {GameState} game
  */
