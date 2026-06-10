@@ -79,6 +79,12 @@ import {
   selectLeaderSkillTarget,
   isPendingLeaderSkillTargetActive,
   isPendingLeaderWizardDrawActive,
+  resolveDestroyOrStealChoice,
+  isPendingDestroyOrStealChoiceActive,
+  isPendingModifierRevealActive,
+  chooseModifierReveal,
+  passModifierReveal,
+  forceResolveModifierReveal,
   playModifierOnPendingRoll,
   restockHand,
   resolveCardPull,
@@ -133,6 +139,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false })
   const [modifierTargetChoice, setModifierTargetChoice] = useState(null)
   const [modifierSecondsLeft, setModifierSecondsLeft] = useState(0)
   const [challengeSecondsLeft, setChallengeSecondsLeft] = useState(0)
+  const [modifierRevealSecondsLeft, setModifierRevealSecondsLeft] = useState(0)
   const [displayRoll, setDisplayRoll] = useState(null)
   const [itemEquipInstanceId, setItemEquipInstanceId] = useState(
     /** @type {string | null} */ (null),
@@ -249,6 +256,36 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false })
     return () => { window.clearInterval(interval); window.clearTimeout(timeout) }
   }, [game?.modifierStartedAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 215 Rex Major: 3-second reveal window timer.
+  const MODIFIER_REVEAL_WINDOW_MS = 3000
+  useEffect(() => {
+    const reveal = game?.pendingModifierReveal
+    if (!reveal || reveal.phase !== 'revealing' || !reveal.revealStartedAt) return undefined
+    const endTime = reveal.revealStartedAt + MODIFIER_REVEAL_WINDOW_MS
+    function tick() {
+      setModifierRevealSecondsLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)))
+    }
+    tick()
+    const interval = window.setInterval(tick, 200)
+    const delay = endTime - Date.now()
+    if (delay <= 0) {
+      window.clearInterval(interval)
+      setGame((prev) => {
+        if (!prev?.pendingModifierReveal || prev.pendingModifierReveal.phase !== 'revealing') return prev
+        return forceResolveModifierReveal(prev).game
+      })
+      return undefined
+    }
+    const timeout = window.setTimeout(() => {
+      window.clearInterval(interval)
+      setGame((prev) => {
+        if (!prev?.pendingModifierReveal || prev.pendingModifierReveal.phase !== 'revealing') return prev
+        return forceResolveModifierReveal(prev).game
+      })
+    }, delay)
+    return () => { window.clearInterval(interval); window.clearTimeout(timeout) }
+  }, [game?.pendingModifierReveal?.revealStartedAt]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (game?.pendingRoll || !displayRoll) return undefined
     const timer = window.setTimeout(() => setDisplayRoll(null), 3000)
@@ -364,6 +401,8 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false })
   const leaderSkillTargetPhase = isPendingLeaderSkillTargetActive(game)
   const leaderSkillTarget = game.pendingLeaderSkillTarget ?? null
   const leaderWizardDrawPhase = isPendingLeaderWizardDrawActive(game)
+  const destroyOrStealPhase = isPendingDestroyOrStealChoiceActive(game)
+  const modifierRevealPhase = isPendingModifierRevealActive(game)
   const interruptPhase =
     modifierPhase ||
     challengePhase ||
@@ -379,7 +418,9 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false })
     heroFromHandPlayPhase ||
     itemSelectionPhase ||
     leaderSkillTargetPhase ||
-    leaderWizardDrawPhase
+    leaderWizardDrawPhase ||
+    destroyOrStealPhase ||
+    modifierRevealPhase
   // All action gates require it to be MY turn (mySeat === currentPlayerIndex)
   const gameOver = game.winner != null
   const canPlay = isMyTurn && game.actionPoints > 0 && !interruptPhase && !itemEquipInstanceId && !gameOver
@@ -765,6 +806,24 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false })
     setGame(nextGame)
   }
 
+  function handleDestroyOrStealChoice(choice) {
+    const { game: nextGame, error } = resolveDestroyOrStealChoice(game, choice)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
+  function handleModifierRevealChoice(shouldReveal) {
+    const { game: nextGame, error } = chooseModifierReveal(game, shouldReveal)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
+  function handlePassModifierReveal() {
+    const { game: nextGame, error } = passModifierReveal(game, mySeat)
+    if (error) { window.alert(error); return }
+    setGame(nextGame)
+  }
+
   function handleLeaderWizardDraw(shouldDraw) {
     const { game: nextGame, error } = resolveLeaderWizardDraw(game, shouldDraw)
     if (error) { window.alert(error); return }
@@ -1095,7 +1154,19 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false })
     !itemEquipInstanceId &&
     !gameOver
 
+  // 209 Warworn Owlbear: block challenges against item plays by passive holder
+  const challengeIsBlockedByPassive = (() => {
+    if (!challengePhase) return false
+    const staged = game.pendingChallenge?.stagedPlay
+    if (!staged) return false
+    if (staged.cardType !== CARD_TYPES.ITEM && staged.cardType !== CARD_TYPES.CURSED_ITEM) return false
+    return game.players[staged.attackerIndex]?.slainMonsters?.some(
+      (m) => m.effectId === 'slainMonsterItemAntiChallenge',
+    ) ?? false
+  })()
+
   const canConsoleChallenge =
+    !challengeIsBlockedByPassive &&
     Boolean(
       selectedHandCard &&
         selectedHandCard.type === CARD_TYPES.CHALLENGE &&
@@ -1543,15 +1614,92 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false })
         onCancel={() => {}}
       />
 
-      {/* Leader 104: draw a card after playing a Magic card */}
-      {leaderWizardDrawPhase && game.pendingLeaderWizardDraw?.playerIndex === mySeat && (
+      {/* "May draw a card" prompt — Wizard leader / Dracos / Crowned Serpent etc. */}
+      {leaderWizardDrawPhase && game.pendingLeaderWizardDraw?.playerIndex === mySeat && (() => {
+        const src = game.pendingLeaderWizardDraw?.sourceLabel
+        const title = src ? `⚔️ ${src}` : '🧙 Wizard Leader Bonus'
+        const descMap = {
+          'Dracos': 'A hero in your party was destroyed. Draw 1 card?',
+          'Crowned Serpent': 'A Modifier card was played. Draw 1 card?',
+        }
+        const desc = src ? (descMap[src] ?? `${src} passive triggered. Draw 1 card?`) : 'You played a Magic card. Draw 1 card?'
+        return (
+          <div className="wizard-draw-overlay">
+            <div className="wizard-draw-modal">
+              <div className="wizard-draw-title">{title}</div>
+              <div className="wizard-draw-desc">{desc}</div>
+              <div className="wizard-draw-actions">
+                <button className="wizard-draw-btn wizard-draw-yes" onClick={() => handleLeaderWizardDraw(true)}>Draw</button>
+                <button className="wizard-draw-btn wizard-draw-no" onClick={() => handleLeaderWizardDraw(false)}>Pass</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* 207 Corrupted Sabretooth: destroy or steal choice */}
+      {destroyOrStealPhase && game.pendingDestroyOrStealChoice?.sourcePlayerIndex === mySeat && (
         <div className="wizard-draw-overlay">
           <div className="wizard-draw-modal">
-            <div className="wizard-draw-title">🧙 Wizard Leader Bonus</div>
-            <div className="wizard-draw-desc">You played a Magic card. Draw 1 card?</div>
+            <div className="wizard-draw-title">⚔️ Corrupted Sabretooth</div>
+            <div className="wizard-draw-desc">
+              Destroy <strong>{game.pendingDestroyOrStealChoice.heroName}</strong>, or steal it instead?
+            </div>
             <div className="wizard-draw-actions">
-              <button className="wizard-draw-btn wizard-draw-yes" onClick={() => handleLeaderWizardDraw(true)}>Draw</button>
-              <button className="wizard-draw-btn wizard-draw-no" onClick={() => handleLeaderWizardDraw(false)}>Pass</button>
+              <button className="wizard-draw-btn wizard-draw-yes" onClick={() => handleDestroyOrStealChoice('steal')}>Steal</button>
+              <button className="wizard-draw-btn wizard-draw-no" onClick={() => handleDestroyOrStealChoice('destroy')}>Destroy</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 215 Rex Major: holder chooses whether to reveal the drawn modifier */}
+      {modifierRevealPhase && game.pendingModifierReveal?.phase === 'choice' && game.pendingModifierReveal?.playerIndex === mySeat && (
+        <div className="wizard-draw-overlay">
+          <div className="wizard-draw-modal">
+            <div className="wizard-draw-title">🦁 Rex Major</div>
+            <div className="wizard-draw-desc">
+              You drew a Modifier card. Reveal <strong>{game.pendingModifierReveal.card?.name ?? 'it'}</strong> to all other players and draw a second card?
+            </div>
+            <div className="wizard-draw-actions">
+              <button className="wizard-draw-btn wizard-draw-yes" onClick={() => handleModifierRevealChoice(true)}>Reveal &amp; Draw</button>
+              <button className="wizard-draw-btn wizard-draw-no" onClick={() => handleModifierRevealChoice(false)}>Keep Hidden</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 215 Rex Major: showing the revealed modifier to non-holder players */}
+      {modifierRevealPhase && game.pendingModifierReveal?.phase === 'revealing' && game.pendingModifierReveal?.playerIndex !== mySeat && !(game.pendingModifierReveal?.revealPassedBy ?? []).includes(mySeat) && (
+        <div className="wizard-draw-overlay">
+          <div className="wizard-draw-modal">
+            <div className="wizard-draw-title">🦁 Rex Major — Revealed Modifier</div>
+            <div className="wizard-draw-desc">
+              <strong>{players[game.pendingModifierReveal.playerIndex]?.name ?? `Player ${game.pendingModifierReveal.playerIndex + 1}`}</strong> revealed a Modifier card:
+            </div>
+            {game.pendingModifierReveal.card?.imageUrl && (
+              <img
+                src={game.pendingModifierReveal.card.imageUrl}
+                alt={game.pendingModifierReveal.card.name ?? 'Modifier'}
+                style={{ width: 120, borderRadius: 6, margin: '8px auto', display: 'block' }}
+              />
+            )}
+            <div className="wizard-draw-actions">
+              <button className="wizard-draw-btn wizard-draw-yes" onClick={handlePassModifierReveal}>
+                Pass ({modifierRevealSecondsLeft}s)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 215 Rex Major: waiting message shown to the holder while others are seeing the reveal */}
+      {modifierRevealPhase && game.pendingModifierReveal?.phase === 'revealing' && game.pendingModifierReveal?.playerIndex === mySeat && (
+        <div className="wizard-draw-overlay">
+          <div className="wizard-draw-modal">
+            <div className="wizard-draw-title">🦁 Rex Major</div>
+            <div className="wizard-draw-desc">
+              Showing <strong>{game.pendingModifierReveal.card?.name ?? 'your modifier'}</strong> to other players… ({modifierRevealSecondsLeft}s)
             </div>
           </div>
         </div>
@@ -1706,7 +1854,7 @@ function App({ roomCode = null, mySeat = 0, playerCount = 3, debugBot = false })
                       : modifierPhase
                       ? playable && card.type === CARD_TYPES.MODIFIER
                       : challengePhase
-                      ? mySeat !== challengeAttackerIndex && playable && card.type === CARD_TYPES.CHALLENGE
+                      ? mySeat !== challengeAttackerIndex && playable && card.type === CARD_TYPES.CHALLENGE && !challengeIsBlockedByPassive
                       : itemEquipInstanceId
                       ? card.instanceId === itemEquipInstanceId
                       : isMyTurn && !interruptPhase && game.actionPoints > 0 && !gameOver && playable

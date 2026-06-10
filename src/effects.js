@@ -1,6 +1,7 @@
 import { CARD_TYPES } from './data/cardUtils.js'
 import { drawFromMainDeck } from './deckHelpers.js'
 import { withFaceUp } from './gameState.js'
+import { applyOnHeroDestroyedPassives, applyOnDrawMagicCardPassives, applyOnDrawItemCardPassives, applyOnDrawModifierCardPassives, isPartyDestroyBlockedByPassive } from './monsterPassives.js'
 
 /** @typedef {import('./gameState.js').GameState} GameState */
 /** @typedef {import('./gameState.js').CardInstance} CardInstance */
@@ -86,9 +87,15 @@ export function draw(game, { playerIndex, count }) {
   if (!player) {
     return { game: afterDraw }
   }
-  const next = updatePlayer(afterDraw, playerIndex, {
+  const withHand = updatePlayer(afterDraw, playerIndex, {
     hand: [...player.hand, ...drawn],
   })
+  // Check ON_DRAW_MAGIC_CARD passives (e.g. 202 Orthus: may play drawn magic card immediately)
+  const afterMagic = applyOnDrawMagicCardPassives(withHand, playerIndex, drawn ?? [])
+  // Check ON_DRAW_ITEM_CARD passives (e.g. 214 Malamammoth: may play drawn item card immediately)
+  const afterItem = applyOnDrawItemCardPassives(afterMagic, playerIndex, drawn ?? [])
+  // Check ON_DRAW_MODIFIER_CARD passives (e.g. 215 Rex Major: may reveal modifier and draw again)
+  const next = applyOnDrawModifierCardPassives(afterItem, playerIndex, drawn ?? [])
   return { game: next, drawn }
 }
 
@@ -214,14 +221,18 @@ export function sacrifice(game, { playerIndex, heroInstanceId }) {
  * `sourcePlayerIndex` is who's running the effect; `targetPlayerIndex` is the
  * victim. If they are the same, this is rejected — use `sacrifice` instead.
  *
+ * Pass `skipSabretoothCheck: true` when called from resolveDestroyOrStealChoice
+ * to avoid re-triggering the passive after the player already chose "destroy".
+ *
  * @param {GameState} game
  * @param {{
  *   sourcePlayerIndex: number,
  *   targetPlayerIndex: number,
  *   heroInstanceId: string,
+ *   skipSabretoothCheck?: boolean,
  * }} params
  */
-export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstanceId }) {
+export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstanceId, skipSabretoothCheck = false }) {
   if (sourcePlayerIndex === targetPlayerIndex) {
     return { game, error: 'Use sacrifice to remove your own hero.' }
   }
@@ -233,9 +244,35 @@ export function destroy(game, { sourcePlayerIndex, targetPlayerIndex, heroInstan
   if (game.partyAntiDestroy === targetPlayerIndex) {
     return { game, error: "That player's party cannot be destroyed right now." }
   }
+  if (isPartyDestroyBlockedByPassive(game, targetPlayerIndex)) {
+    return { game, error: "That player's party cannot be destroyed (Terratuga passive)." }
+  }
+
+  // 207 Corrupted Sabretooth: source player may steal the hero instead of destroying it.
+  if (!skipSabretoothCheck) {
+    const hasSabretoothPassive = game.players[sourcePlayerIndex]?.slainMonsters?.some(
+      (m) => m.effectId === 'slainMonsterStealInsteadOfDestroy',
+    )
+    if (hasSabretoothPassive) {
+      return {
+        game: {
+          ...game,
+          pendingDestroyOrStealChoice: {
+            sourcePlayerIndex,
+            targetPlayerIndex,
+            heroInstanceId,
+            heroName: slot?.hero?.name ?? heroInstanceId,
+          },
+        },
+      }
+    }
+  }
+
   const { game: after, blocked } = tryDecoyDoll(game, targetPlayerIndex, heroInstanceId)
   if (blocked) return { game: after }
-  return removeHeroToDiscard(after, targetPlayerIndex, heroInstanceId)
+  const { game: afterRemove, discarded, error } = removeHeroToDiscard(after, targetPlayerIndex, heroInstanceId)
+  if (error) return { game: afterRemove, error }
+  return { game: applyOnHeroDestroyedPassives(afterRemove, targetPlayerIndex), discarded }
 }
 
 /**
@@ -257,6 +294,9 @@ export function destroyAndTakeItems(game, { sourcePlayerIndex, targetPlayerIndex
   if (game.partyAntiDestroy === targetPlayerIndex) {
     return { game, error: "That player's party cannot be destroyed right now." }
   }
+  if (isPartyDestroyBlockedByPassive(game, targetPlayerIndex)) {
+    return { game, error: "That player's party cannot be destroyed (Terratuga passive)." }
+  }
   const { game: after, blocked } = tryDecoyDoll(game, targetPlayerIndex, heroInstanceId)
   if (blocked) return { game: after }
 
@@ -276,7 +316,8 @@ export function destroyAndTakeItems(game, { sourcePlayerIndex, targetPlayerIndex
     if (i === sourcePlayerIndex) return { ...p, hand: [...p.hand, ...itemsForHand] }
     return p
   })
-  return { game: { ...after, players, discardPile } }
+  const afterGame = { ...after, players, discardPile }
+  return { game: applyOnHeroDestroyedPassives(afterGame, targetPlayerIndex) }
 }
 
 /**

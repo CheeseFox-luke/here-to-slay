@@ -393,7 +393,9 @@ export function partyHasHero(partySlots) {
  * @property {PendingWigglesRoll | null} [pendingWigglesRoll]
  * @property {PendingLeaderModifierBonus | null} [pendingLeaderModifierBonus]
  * @property {PendingLeaderSkillTarget | null} [pendingLeaderSkillTarget]
- * @property {{ playerIndex: number } | null} [pendingLeaderWizardDraw]
+ * @property {{ playerIndex: number, sourceLabel?: string } | null} [pendingLeaderWizardDraw]
+ * @property {{ sourcePlayerIndex: number, targetPlayerIndex: number, heroInstanceId: string, heroName: string } | null} [pendingDestroyOrStealChoice]
+ * @property {{ playerIndex: number, card: CardInstance, phase: 'choice' | 'revealing', revealStartedAt?: number, revealPassedBy?: number[] } | null} [pendingModifierReveal]
  * @property {number | null} [partyAntiSteal] - playerIndex whose entire party cannot be stolen; cleared at start of that player's next turn.
  * @property {number | null} [partyAntiDestroy] - playerIndex whose entire party cannot be destroyed; cleared at start of that player's next turn.
  * @property {number | null} [winner] - playerIndex of the winner; null while game is ongoing.

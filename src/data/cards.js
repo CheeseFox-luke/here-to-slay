@@ -173,7 +173,7 @@ export const heroCardsByClass = {
       effectId: 'wiseShield',
       effect: '+3 to all of your rolls until the end of your turn.',
     }),
-    createHeroCard('Calming Voice', 'HtS-Base-045-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
+    createHeroCard('Mighty Blade', 'HtS-Base-045-Hero-Guardian.png', HERO_CLASSES.GUARDIAN, {
       rollRequirement: 8,
       effectId: 'calmingVoiceAntiDestroy',
       effect: 'Hero cards in your party cannot be destroyed until your next turn.',

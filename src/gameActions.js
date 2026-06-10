@@ -164,6 +164,14 @@ export function isPendingLeaderWizardDrawActive(game) {
   return (game.pendingLeaderWizardDraw ?? null) !== null
 }
 
+export function isPendingDestroyOrStealChoiceActive(game) {
+  return (game.pendingDestroyOrStealChoice ?? null) !== null
+}
+
+export function isPendingModifierRevealActive(game) {
+  return (game.pendingModifierReveal ?? null) !== null
+}
+
 export function isInterruptPhaseActive(game) {
   return (
     isChallengeWindowActive(game) ||
@@ -179,7 +187,9 @@ export function isInterruptPhaseActive(game) {
     isPendingHeroPlayChoiceActive(game) ||
     isPendingHeroFromHandPlayActive(game) ||
     isPendingItemSelectionActive(game) ||
-    isPendingLeaderWizardDrawActive(game)
+    isPendingLeaderWizardDrawActive(game) ||
+    isPendingDestroyOrStealChoiceActive(game) ||
+    isPendingModifierRevealActive(game)
   )
 }
 
@@ -388,8 +398,9 @@ function applyLeaderPassives(game, roll, rollingPlayerIndex) {
   }
 
   // Slain monster passives that grant +1 to hero effect rolls (e.g. 203 Dark Dragon King)
+  // or +1 to ALL rolls (e.g. 211 Anuran Cauldron)
   for (const monster of (player?.slainMonsters ?? [])) {
-    if (monster.effectId === 'slainMonsterHeroRollBonus') {
+    if (monster.effectId === 'slainMonsterHeroRollBonus' || monster.effectId === 'slainMonsterAllRollBonus') {
       result = applyDeltaToPendingRoll(result, 1, monster.name)
     }
   }
@@ -1410,6 +1421,14 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
   const staged = game.pendingChallenge.stagedPlay
   const attacker = game.players[staged.attackerIndex]
 
+  // 209 Warworn Owlbear passive: item cards played by this player cannot be challenged
+  if (staged.cardType === CARD_TYPES.ITEM || staged.cardType === CARD_TYPES.CURSED_ITEM) {
+    const hasPassive = attacker?.slainMonsters?.some((m) => m.effectId === 'slainMonsterItemAntiChallenge')
+    if (hasPassive) {
+      return { game, error: 'Item cards played by this player cannot be challenged (Warworn Owlbear).' }
+    }
+  }
+
   let pendingRoll = rollForChallenge(
     staged.attackerIndex,
     challengerIndex,
@@ -1426,12 +1445,41 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
     pendingRoll = applyDeltaToChallengeRoll(pendingRoll, 2, game.players[challengerIndex].leader.name, 'challenger')
   }
 
+  // Slain monster passives: +1 to that player's side of every challenge roll
+  // (206 Titan Wyvern: slainMonsterChallengeRollBonus, 211 Anuran Cauldron: slainMonsterAllRollBonus)
+  for (const m of (game.players[staged.attackerIndex]?.slainMonsters ?? [])) {
+    if (m.effectId === 'slainMonsterChallengeRollBonus' || m.effectId === 'slainMonsterAllRollBonus') {
+      pendingRoll = applyDeltaToChallengeRoll(pendingRoll, 1, m.name, 'attacker')
+    }
+  }
+  for (const m of (game.players[challengerIndex]?.slainMonsters ?? [])) {
+    if (m.effectId === 'slainMonsterChallengeRollBonus' || m.effectId === 'slainMonsterAllRollBonus') {
+      pendingRoll = applyDeltaToChallengeRoll(pendingRoll, 1, m.name, 'challenger')
+    }
+  }
+
   const hand = challenger.hand.filter((_, index) => index !== handIndex)
   const discardPile = [...game.discardPile, withFaceUp(card)]
 
   const players = game.players.map((p, index) =>
     index === challengerIndex ? { ...p, hand } : p,
   )
+
+  // 212 Bloodwing: challenger must discard a card when challenging this player.
+  // Set pendingDiscard alongside pendingRoll — discard dialog resolves first, then
+  // the normal modifier/challenge window becomes active.
+  const bloodwingDiscard =
+    attacker?.slainMonsters?.some((m) => m.effectId === 'slainMonsterChallengeDiscard') &&
+    hand.length > 0  // challenger still has cards after playing the challenge card
+      ? {
+          pendingDiscard: {
+            playerIndex: challengerIndex,
+            sourcePlayerIndex: challengerIndex,
+            count: 1,
+            sourceLabel: 'Bloodwing',
+          },
+        }
+      : {}
 
   const mw = openModifierWindow(game, pendingRoll)
   return {
@@ -1443,6 +1491,7 @@ export function playChallengeCard(game, challengerIndex, instanceId) {
       challengePassedBy: [],
       challengeStartedAt: null,
       ...mw,
+      ...bloodwingDiscard,
     },
     pendingRoll: mw.pendingRoll,
     error: null,
@@ -1710,6 +1759,12 @@ export function attackMonster(game, monsterInstanceId) {
   if (game.players[playerIndex]?.leader?.effectId === 'leaderMonsterRollBonus') {
     pendingRoll = applyDeltaToPendingRoll(pendingRoll, 1, game.players[playerIndex].leader.name)
   }
+  // Slain monster passives: +1 to monster attack rolls (211 Anuran Cauldron)
+  for (const m of (game.players[playerIndex]?.slainMonsters ?? [])) {
+    if (m.effectId === 'slainMonsterAllRollBonus') {
+      pendingRoll = applyDeltaToPendingRoll(pendingRoll, 1, m.name)
+    }
+  }
   const mw = openModifierWindow(game, pendingRoll)
   return {
     game: {
@@ -1778,7 +1833,7 @@ export function playModifierOnPendingRoll(
       ? `${player.name}: ${delta >= 0 ? '+' : ''}${delta}`
       : `${player.name}: ${effect.options[choiceIndex]?.label ?? delta}`
 
-  const pendingRoll =
+  let pendingRoll =
     game.pendingRoll.rollType === 'challenge'
       ? applyDeltaToChallengeRoll(
           game.pendingRoll,
@@ -1787,6 +1842,22 @@ export function playModifierOnPendingRoll(
           challengeTarget,
         )
       : applyDeltaToPendingRoll(game.pendingRoll, delta, modifierLabel)
+
+  // 213 Abyss Queen: when an opponent plays a modifier on your roll, auto +1.
+  // Roll owner = rollingPlayerIndex for hero/monster rolls; attacker or challenger for challenge rolls.
+  const rollOwnerIndex = game.pendingRoll.rollType === 'challenge'
+    ? (challengeTarget === 'attacker' ? game.pendingRoll.attackerIndex : game.pendingRoll.challengerIndex)
+    : game.pendingRoll.rollingPlayerIndex
+  if (rollOwnerIndex !== undefined && playerIndex !== rollOwnerIndex) {
+    const hasAbyssQueenPassive = game.players[rollOwnerIndex]?.slainMonsters?.some(
+      (m) => m.effectId === 'slainMonsterOpponentModifierBonus',
+    )
+    if (hasAbyssQueenPassive) {
+      pendingRoll = game.pendingRoll.rollType === 'challenge' && challengeTarget
+        ? applyDeltaToChallengeRoll(pendingRoll, 1, 'Abyss Queen', challengeTarget)
+        : applyDeltaToPendingRoll(pendingRoll, 1, 'Abyss Queen')
+    }
+  }
 
   const hand = player.hand.filter((_, index) => index !== handIndex)
   const discardPile = [...game.discardPile, withFaceUp(card)]
@@ -1927,6 +1998,98 @@ export function resolveLeaderModifierBonus(game, delta) {
 }
 
 /**
+ * 207 Corrupted Sabretooth: player chose whether to destroy or steal the hero.
+ * @param {GameState} game
+ * @param {'destroy' | 'steal'} choice
+ * @returns {{ game: GameState, error: string | null }}
+ */
+export function resolveDestroyOrStealChoice(game, choice) {
+  const pending = game.pendingDestroyOrStealChoice
+  if (!pending) return { game, error: 'No destroy-or-steal choice pending.' }
+  const { sourcePlayerIndex, targetPlayerIndex, heroInstanceId } = pending
+  const cleared = { ...game, pendingDestroyOrStealChoice: null }
+  if (choice === 'steal') {
+    const { game: afterSteal, error } = stealEffect(cleared, { sourcePlayerIndex, targetPlayerIndex, heroInstanceId })
+    if (error) return { game: cleared, error }
+    return { game: afterSteal, error: null }
+  }
+  // choice === 'destroy': call destroy with skipSabretoothCheck to avoid recursion
+  const { game: afterDestroy, error } = destroyEffect(cleared, { sourcePlayerIndex, targetPlayerIndex, heroInstanceId, skipSabretoothCheck: true })
+  if (error) return { game: cleared, error }
+  return { game: afterDestroy, error: null }
+}
+
+/**
+ * 215 Rex Major: holder chose whether to reveal the drawn modifier.
+ * - shouldReveal=false  → cancel, keep the card hidden, no second draw
+ * - shouldReveal=true   → transition to 'revealing' phase with a 3-second timer
+ *
+ * @param {GameState} game
+ * @param {boolean} shouldReveal
+ * @returns {{ game: GameState, error: string | null }}
+ */
+export function chooseModifierReveal(game, shouldReveal) {
+  const pending = game.pendingModifierReveal
+  if (!pending || pending.phase !== 'choice') return { game, error: 'No modifier reveal choice pending.' }
+  if (!shouldReveal) {
+    return { game: { ...game, pendingModifierReveal: null }, error: null }
+  }
+  return {
+    game: {
+      ...game,
+      pendingModifierReveal: {
+        ...pending,
+        card: { ...pending.card, faceUp: true },
+        phase: 'revealing',
+        revealStartedAt: Date.now(),
+        revealPassedBy: [],
+      },
+    },
+    error: null,
+  }
+}
+
+/**
+ * 215 Rex Major: a non-holder player clicks "Pass" during the reveal window.
+ * When all non-holder players have passed, automatically draws a second card for the holder.
+ *
+ * @param {GameState} game
+ * @param {number} playerIndex - the player passing
+ * @returns {{ game: GameState, error: string | null }}
+ */
+export function passModifierReveal(game, playerIndex) {
+  const pending = game.pendingModifierReveal
+  if (!pending || pending.phase !== 'revealing') return { game, error: 'No modifier reveal in progress.' }
+  const revealPassedBy = [...(pending.revealPassedBy ?? []), playerIndex]
+  const otherIndices = game.players.map((_, i) => i).filter((i) => i !== pending.playerIndex)
+  const allPassed = otherIndices.every((i) => revealPassedBy.includes(i))
+  if (allPassed) {
+    const cleared = { ...game, pendingModifierReveal: null }
+    const { game: afterDraw } = drawEffect(cleared, { playerIndex: pending.playerIndex, count: 1 })
+    return { game: afterDraw, error: null }
+  }
+  return {
+    game: { ...game, pendingModifierReveal: { ...pending, revealPassedBy } },
+    error: null,
+  }
+}
+
+/**
+ * 215 Rex Major: force-resolve the reveal when the 3-second timer expires.
+ * Draws a second card for the holder regardless of who has passed.
+ *
+ * @param {GameState} game
+ * @returns {{ game: GameState, error: string | null }}
+ */
+export function forceResolveModifierReveal(game) {
+  const pending = game.pendingModifierReveal
+  if (!pending) return { game, error: 'No modifier reveal pending.' }
+  const cleared = { ...game, pendingModifierReveal: null }
+  const { game: afterDraw } = drawEffect(cleared, { playerIndex: pending.playerIndex, count: 1 })
+  return { game: afterDraw, error: null }
+}
+
+/**
  * Resolve the Wizard leader's "draw a card?" bonus.
  * @param {GameState} game
  * @param {boolean} shouldDraw - true if the player chose to draw
@@ -1972,8 +2135,18 @@ function finalizeHeroRoll(game) {
 
   const resolvedGame = { ...afterEffect, pendingRoll: null, pendingDestroyTargets: [] }
   const gameWithCoin = applyOnSuccessItemEffects(resolvedGame, pending)
+
+  // 210 Arctic Aries: after a successful hero roll, automatically draw a card
+  const rollingPlayerIndex = pending.effectSourcePlayerIndex
+  const hasAriesPassive = gameWithCoin.players[rollingPlayerIndex]?.slainMonsters?.some(
+    (m) => m.effectId === 'slainMonsterHeroSuccessDraw',
+  )
+  const finalGame = hasAriesPassive
+    ? drawEffect(gameWithCoin, { playerIndex: rollingPlayerIndex, count: 1 }).game
+    : gameWithCoin
+
   return {
-    game: gameWithCoin,
+    game: finalGame,
     diceRoll: null,
     effectError: error,
   }
@@ -3107,7 +3280,9 @@ export function endTurn(game) {
     ...game,
     players,
     currentPlayerIndex: nextIndex,
-    actionPoints: (game.debugInfiniteAp && nextIndex === 0) ? 999 : INITIAL_ACTION_POINTS,
+    actionPoints: (game.debugInfiniteAp && nextIndex === 0)
+      ? 999
+      : INITIAL_ACTION_POINTS + (players[nextIndex]?.slainMonsters?.some((m) => m.effectId === 'slainMonsterExtraAP') ? 1 : 0),
     pendingRoll: null,
     pendingChallenge: null,
     pendingEffectTargetSelection: null,
@@ -3130,6 +3305,8 @@ export function endTurn(game) {
     pendingLeaderModifierBonus: null,
     pendingLeaderSkillTarget: null,
     pendingLeaderWizardDraw: null,
+    pendingDestroyOrStealChoice: null,
+    pendingModifierReveal: null,
     antiChallenge: false,
     antiModifier: false,
     challengePassedBy: [],

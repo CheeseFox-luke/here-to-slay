@@ -484,7 +484,7 @@ export function calmingVoiceAntiStealEffect(game, { sourcePlayerIndex }) {
 }
 
 /**
- * Calming Voice (045): protect your entire party from destroy until your next turn.
+ * Mighty Blade (045): protect your entire party from destroy until your next turn.
  * @param {GameState} game
  * @param {{ sourcePlayerIndex: number }} params
  */
