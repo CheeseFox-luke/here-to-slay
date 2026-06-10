@@ -1,4 +1,5 @@
-import { CARD_TYPES, HERO_CLASSES } from './data/cardUtils.js'
+import { CARD_TYPES, HERO_CLASSES, REQUIREMENT_HERO } from './data/cardUtils.js'
+import { applyOnModifierPlayPassives } from './monsterPassives.js'
 import {
   getModifierEffect,
   resolveModifierDelta,
@@ -344,6 +345,18 @@ export function resetPartySkillUsage(partySlots) {
 }
 
 /**
+ * Clear antiSteal / antiDestroy from every hero in a party.
+ * Called at the START of a player's turn so protections applied on their
+ * previous turn expire exactly when their next turn begins.
+ * @param {(PartySlot | null)[]} partySlots
+ */
+function clearPartyProtectionFlags(partySlots) {
+  return partySlots.map((slot) =>
+    slot ? { ...slot, hero: { ...slot.hero, antiSteal: false, antiDestroy: false } } : null,
+  )
+}
+
+/**
  * Find the items equipped on a hero across all players' party slots.
  * @param {GameState} game
  * @param {string} heroInstanceId
@@ -366,12 +379,22 @@ function findHeroItems(game, heroInstanceId) {
  * @returns {import('./gameState.js').PendingRoll}
  */
 function applyLeaderPassives(game, roll, rollingPlayerIndex) {
-  const leader = game.players[rollingPlayerIndex]?.leader
-  if (!leader?.effectId) return roll
-  if (leader.effectId === 'leaderHeroRollBonus') {
-    return applyDeltaToPendingRoll(roll, 1, leader.name)
+  const player = game.players[rollingPlayerIndex]
+  let result = roll
+
+  // Leader 106 (Bard): +1 to all hero effect rolls
+  if (player?.leader?.effectId === 'leaderHeroRollBonus') {
+    result = applyDeltaToPendingRoll(result, 1, player.leader.name)
   }
-  return roll
+
+  // Slain monster passives that grant +1 to hero effect rolls (e.g. 203 Dark Dragon King)
+  for (const monster of (player?.slainMonsters ?? [])) {
+    if (monster.effectId === 'slainMonsterHeroRollBonus') {
+      result = applyDeltaToPendingRoll(result, 1, monster.name)
+    }
+  }
+
+  return result
 }
 
 /**
@@ -1601,6 +1624,57 @@ export function triggerHeroSkill(game, heroInstanceId) {
  * @param {GameState} game
  * @param {string} monsterInstanceId
  */
+/**
+ * Recursively check if all monster requirements can be matched to distinct heroes.
+ * Each hero / leader slot satisfies at most one requirement.
+ * REQUIREMENT_HERO matches any class; a specific class string matches only that class.
+ *
+ * @param {string[]} requirements
+ * @param {string[]} available - one entry per available hero (their current class string)
+ * @returns {boolean}
+ */
+function canMatchRequirements(requirements, available) {
+  if (requirements.length === 0) return true
+  const [first, ...rest] = requirements
+  for (let i = 0; i < available.length; i++) {
+    const cls = available[i]
+    if (first === REQUIREMENT_HERO || cls === first) {
+      const remaining = [...available.slice(0, i), ...available.slice(i + 1)]
+      if (canMatchRequirements(rest, remaining)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Check whether a player's party (+ leader) meets a monster's requirements.
+ * Leader counts as exactly one hero with their class.
+ * A single hero cannot satisfy two requirements simultaneously.
+ *
+ * @param {GameState} game
+ * @param {number} playerIndex
+ * @param {import('./gameState.js').CardInstance} monster
+ * @returns {boolean}
+ */
+function meetsMonsterRequirements(game, playerIndex, monster) {
+  const requirements = monster.requirement ?? []
+  if (requirements.length === 0) return true
+
+  const player = game.players[playerIndex]
+  /** @type {string[]} */
+  const available = []
+
+  // Leader provides one hero slot with their class
+  if (player.leader?.class) available.push(player.leader.class)
+
+  // Each occupied party slot provides one slot with the hero's current class
+  for (const slot of player.partySlots) {
+    if (slot) available.push(slot.hero.class)
+  }
+
+  return canMatchRequirements(requirements, available)
+}
+
 export function attackMonster(game, monsterInstanceId) {
   if (isInterruptPhaseActive(game)) {
     return { game, diceRoll: null, error: 'Finish the challenge or modifier window first.' }
@@ -1620,6 +1694,10 @@ export function attackMonster(game, monsterInstanceId) {
 
   if (!monster) {
     return { game, diceRoll: null, error: 'Monster not found.' }
+  }
+
+  if (!meetsMonsterRequirements(game, playerIndex, monster)) {
+    return { game, diceRoll: null, error: "Your party doesn't meet this monster's requirements." }
   }
 
   let pendingRoll = rollForMonsterAttack(
@@ -1718,29 +1796,34 @@ export function playModifierOnPendingRoll(
   )
 
   // Leader 101: after playing any modifier, grant a free +1/-1 choice on the same roll
-  const leaderBonus =
-    game.players[playerIndex]?.leader?.effectId === 'leaderModifierBonus'
-      ? {
-          pendingLeaderModifierBonus: {
-            playerIndex,
-            leaderName: game.players[playerIndex].leader.name,
-            challengeTarget: challengeTarget ?? null,
-          },
-        }
-      : {}
+  const hasLeaderBonus = game.players[playerIndex]?.leader?.effectId === 'leaderModifierBonus'
+  const leaderBonus = hasLeaderBonus
+    ? {
+        pendingLeaderModifierBonus: {
+          playerIndex,
+          leaderName: game.players[playerIndex].leader.name,
+          challengeTarget: challengeTarget ?? null,
+        },
+      }
+    : {}
 
-  return {
-    game: {
-      ...game,
-      players,
-      discardPile,
-      pendingRoll,
-      modifierPassedBy: [],
-      modifierStartedAt: Date.now(),
-      ...leaderBonus,
-    },
+  const baseGame = {
+    ...game,
+    players,
+    discardPile,
     pendingRoll,
+    modifierPassedBy: [],
+    modifierStartedAt: Date.now(),
+    ...leaderBonus,
   }
+
+  // 205 Crowned Serpent: any player playing a Modifier lets passive holder draw a card.
+  // If leader 101 bonus is pending, defer — it will be checked in resolveLeaderModifierBonus.
+  const finalGame = hasLeaderBonus
+    ? baseGame
+    : applyOnModifierPlayPassives(baseGame)
+
+  return { game: finalGame, pendingRoll }
 }
 
 /**
@@ -1836,10 +1919,11 @@ export function resolveLeaderModifierBonus(game, delta) {
       ? applyDeltaToChallengeRoll(game.pendingRoll, delta, label, pending.challengeTarget)
       : applyDeltaToPendingRoll(game.pendingRoll, delta, label)
 
-  return {
-    game: { ...game, pendingRoll, pendingLeaderModifierBonus: null },
-    pendingRoll,
-  }
+  // After leader 101 resolves, check Crowned Serpent passive (deferred from modifier play)
+  const afterBonus = { ...game, pendingRoll, pendingLeaderModifierBonus: null }
+  const finalGame = applyOnModifierPlayPassives(afterBonus)
+
+  return { game: finalGame, pendingRoll }
 }
 
 /**
@@ -1910,16 +1994,26 @@ function finalizeMonsterRoll(game) {
   if (!roll || roll.rollType !== 'monster') return { game }
 
   const { currentSum, rollingPlayerIndex, targetMonsterInstanceId } = roll
-  const failAt = roll.failAtOrBelow ?? 5
-  const succeedAt = roll.successAtOrAbove ?? 8
 
   const cleared = { ...game, pendingRoll: null }
 
-  if (currentSum >= succeedAt) {
+  // Look up the monster to check for custom (possibly reversed) thresholds
+  const monster = cleared.activeMonsters.find(
+    (m) => m.instanceId === targetMonsterInstanceId,
+  )
+
+  // Determine success/failure based on monster-specific thresholds.
+  // Dracos (and any future reversed monsters) use successAtOrBelow/failAtOrAbove.
+  const isReversed = monster?.successAtOrBelow !== undefined
+  const isSuccess = isReversed
+    ? currentSum <= (monster.successAtOrBelow ?? 5)
+    : currentSum >= (monster?.successAtOrAbove ?? roll.successAtOrAbove ?? 8)
+  const isFailure = isReversed
+    ? currentSum >= (monster.failAtOrAbove ?? 8)
+    : currentSum <= (monster?.failAtOrBelow ?? roll.failAtOrBelow ?? 5)
+
+  if (isSuccess) {
     // ── Success: slay the monster ──────────────────────────────────────────
-    const monster = cleared.activeMonsters.find(
-      (m) => m.instanceId === targetMonsterInstanceId,
-    )
     if (!monster) return { game: cleared }
 
     const newActiveMonsters = cleared.activeMonsters.filter(
@@ -1950,8 +2044,26 @@ function finalizeMonsterRoll(game) {
     }
   }
 
-  if (currentSum <= failAt) {
-    // ── Failure: player must sacrifice a hero ──────────────────────────────
+  if (isFailure) {
+    const monsterName = monster?.name ?? 'Monster'
+
+    // ── Custom failure: Discard N cards (e.g. Orthus) ─────────────────────
+    if (monster?.failEffectId === 'discardCards') {
+      const count = monster.failEffectCount ?? 2
+      return {
+        game: {
+          ...cleared,
+          pendingDiscard: {
+            playerIndex: rollingPlayerIndex,
+            sourcePlayerIndex: rollingPlayerIndex,
+            count,
+            sourceLabel: `${monsterName}: Attack Failed`,
+          },
+        },
+      }
+    }
+
+    // ── Default failure: sacrifice a hero ──────────────────────────────────
     const player = cleared.players[rollingPlayerIndex]
     const hasHero = player?.partySlots.some((s) => s !== null)
     if (!hasHero) return { game: cleared }
@@ -2987,7 +3099,9 @@ export function endTurn(game) {
     partySlots:
       index === game.currentPlayerIndex
         ? resetPartySkillUsage(p.partySlots)
-        : p.partySlots,
+        : index === nextIndex
+          ? clearPartyProtectionFlags(p.partySlots)
+          : p.partySlots,
   }))
 
   return {
